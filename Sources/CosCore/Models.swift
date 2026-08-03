@@ -270,6 +270,8 @@ public struct AgentRequest: Sendable {
     public var fullAccess: Bool
     public var workspaceIsTrusted: Bool
     public var extensionInstructions: String
+    public var toolsEnabled: Bool
+    public var computerUseEnabled: Bool
 
     public init(
         prompt: String,
@@ -281,7 +283,9 @@ public struct AgentRequest: Sendable {
         fastMode: Bool,
         fullAccess: Bool,
         workspaceIsTrusted: Bool = false,
-        extensionInstructions: String = ""
+        extensionInstructions: String = "",
+        toolsEnabled: Bool = true,
+        computerUseEnabled: Bool = false
     ) {
         self.prompt = prompt
         self.latestUserRequest = latestUserRequest ?? prompt
@@ -293,6 +297,8 @@ public struct AgentRequest: Sendable {
         self.fullAccess = fullAccess
         self.workspaceIsTrusted = workspaceIsTrusted
         self.extensionInstructions = extensionInstructions
+        self.toolsEnabled = toolsEnabled
+        self.computerUseEnabled = computerUseEnabled
     }
 }
 
@@ -317,6 +323,7 @@ public struct AppPreferences: Codable, Equatable, Sendable {
     public var defaultWorkspace = FileManager.default.homeDirectoryForCurrentUser.path
     public var selectedModelID = DefaultCatalog.models[0].id
     public var defaultEffort = ReasoningEffort.high
+    public var titleModelID: String?
 
     public init() {}
 }
@@ -353,9 +360,11 @@ public enum DefaultCatalog {
     public static let models: [ModelProfile] = [
         .init(id: "chatgpt:gpt-5.6-sol", providerID: "chatgpt", name: "5.6 Sol", model: "gpt-5.6-sol", contextWindow: 400_000),
         .init(id: "chatgpt:gpt-5.6-terra", providerID: "chatgpt", name: "5.6 Terra", model: "gpt-5.6-terra", contextWindow: 400_000),
+        .init(id: "chatgpt:gpt-5.6-luna", providerID: "chatgpt", name: "5.6 Luna", model: "gpt-5.6-luna", contextWindow: 200_000, supportsImages: false, supportsTools: false, supportedEfforts: [.low]),
         .init(id: "anthropic:claude-opus-5", providerID: "anthropic", name: "Claude Opus 5", model: "claude-opus-5", contextWindow: 200_000, supportedEfforts: [.low, .medium, .high, .extraHigh, .max]),
         .init(id: "anthropic:claude-sonnet-5", providerID: "anthropic", name: "Claude Sonnet 5", model: "claude-sonnet-5", contextWindow: 200_000, supportedEfforts: [.low, .medium, .high, .extraHigh, .max]),
         .init(id: "anthropic:claude-fable-5", providerID: "anthropic", name: "Claude Fable 5", model: "claude-fable-5", contextWindow: 200_000, supportedEfforts: [.low, .medium, .high, .extraHigh, .max]),
+        .init(id: "anthropic:claude-haiku-4.5", providerID: "anthropic", name: "Claude Haiku 4.5", model: "claude-haiku-4.5", contextWindow: 200_000, supportsImages: false, supportsTools: false, supportedEfforts: [.low]),
         .init(id: "xai:grok-4.5", providerID: "xai", name: "Grok 4.5", model: "grok-4.5", contextWindow: 256_000, supportedEfforts: [.low, .medium, .high]),
         .init(id: "opencode-go:big-pickle", providerID: "opencode-go", name: "Big Pickle", model: "opencode/big-pickle", contextWindow: 200_000),
         .init(id: "qwen:qwen3.8-max", providerID: "qwen", name: "Qwen 3.8 Max", model: "qwen3.8-max", contextWindow: 262_144),

@@ -65,6 +65,7 @@ final class AppModel: ObservableObject {
     @Published var activity = "Ready"
     @Published var lastError: String?
     @Published var loginStatus: [String: String] = [:]
+    @Published var providerSessions: [String: ProviderSessionInfo] = [:]
     @Published var isPluginLibraryPresented = false
     @Published var pendingDirectoryTrust: PendingDirectoryTrust?
     @Published var skillImportCounts: [ExternalSkillSource: Int] = [:]
@@ -87,10 +88,12 @@ final class AppModel: ObservableObject {
     private let secureStore = SecureStore()
     private let updateService = CosUpdateService()
     private var runningTask: Task<Void, Never>?
+    private var titleTasks: [UUID: Task<Void, Never>] = [:]
     private var updateCheckTask: Task<Void, Never>?
     private var lastUpdateCheck: Date?
     private var trustedWorkspaces: Set<String>
     private var disabledPluginIDs: Set<String>
+    private var disabledSkillKeys: Set<String>
     private let builtInPluginsURL: URL?
     private static let logger = Logger(subsystem: "codes.ssh.cos", category: "app-model")
 
@@ -101,6 +104,7 @@ final class AppModel: ObservableObject {
         self.models = Self.mergeModels(Self.load([ModelProfile].self, key: "models"))
         self.trustedWorkspaces = Set(Self.load([String].self, key: "trustedWorkspaces") ?? [])
         self.disabledPluginIDs = Set(Self.load([String].self, key: "disabledPluginIDs") ?? [])
+        self.disabledSkillKeys = Set(Self.load([String].self, key: "disabledSkillKeys") ?? [])
         Task { await bootstrap() }
     }
 
@@ -123,6 +127,16 @@ final class AppModel: ObservableObject {
         providers.first { $0.id == selectedModel.providerID } ?? providers[0]
     }
 
+    var titleModels: [ModelProfile] {
+        let preferredIDs = ["chatgpt:gpt-5.6-luna", "xai:grok-4.5", "anthropic:claude-haiku-4.5"]
+        return preferredIDs.compactMap { id in models.first { $0.id == id } }
+    }
+
+    var selectedTitleModel: ModelProfile? {
+        let requested = preferences.titleModelID ?? "chatgpt:gpt-5.6-luna"
+        return titleModels.first { $0.id == requested } ?? titleModels.first
+    }
+
     private func bootstrap() async {
         do {
             threads = try await store.loadAll()
@@ -133,6 +147,7 @@ final class AppModel: ObservableObject {
         if threads.isEmpty { newThread() } else { selectedThreadID = threads.first?.id }
         await reloadPlugins()
         refreshSkillImportCounts()
+        refreshProviderSessions()
         await checkForUpdates()
         schedulePeriodicUpdateChecks()
     }
@@ -241,6 +256,7 @@ final class AppModel: ObservableObject {
 
     func deleteThread(_ id: UUID) {
         guard !isRunning || selectedThreadID != id else { return }
+        titleTasks.removeValue(forKey: id)?.cancel()
         threads.removeAll { $0.id == id }
         if selectedThreadID == id { selectedThreadID = threads.first?.id }
         Task { try? await store.delete(id: id) }
@@ -306,7 +322,8 @@ final class AppModel: ObservableObject {
         if appendUserMessage {
             threads[index].messages.append(.init(role: .user, content: prompt))
             if threads[index].messages.count == 1 {
-                threads[index].title = String(prompt.prefix(54))
+                threads[index].title = "New task"
+                scheduleTitleGeneration(threadID: threads[index].id, prompt: prompt)
             }
             if handleSlashCommand(prompt, threadIndex: index) {
                 threads[index].updatedAt = Date()
@@ -336,10 +353,21 @@ final class AppModel: ObservableObject {
         let goalContext = threads[index].goal.map {
             "Active goal: \($0.objective)\nGoal status: \($0.status.rawValue)\nTokens used: \($0.usedTokens)\n"
         } ?? ""
+        let referencePlugins = plugins.map { plugin in
+            var visible = plugin
+            visible.manifest.skills = plugin.manifest.skills.filter { isSkillEnabled($0, in: plugin) }
+            return visible
+        }
+        let referenceContext = ComposerReferenceResolver.referenceContext(in: prompt, plugins: referencePlugins)
+        let computerUseEnabled = plugins.contains { $0.id == "codes.ssh.cos.computer-use" && $0.isEnabled }
+        if computerUseEnabled, !computerUseAccessGranted, Self.looksLikeComputerUseRequest(prompt) {
+            requestComputerUseAccess()
+        }
         let effectivePrompt = """
         \(CosSettingsPlugin.systemPrompt)
 
         \(goalContext)
+        \(referenceContext)
         Conversation context:
         \(compaction.promptContext)
 
@@ -355,7 +383,8 @@ final class AppModel: ObservableObject {
             fastMode: preferences.fastMode,
             fullAccess: preferences.fullAccess,
             workspaceIsTrusted: isWorkspaceTrusted(threads[index].workspacePath),
-            extensionInstructions: activeExtensionInstructions()
+            extensionInstructions: activeExtensionInstructions(),
+            computerUseEnabled: computerUseEnabled
         )
         persist(threads[index])
 
@@ -646,6 +675,8 @@ final class AppModel: ObservableObject {
         var manifest = try JSONDecoder().decode(CosPluginManifest.self, from: Data(contentsOf: manifestURL))
         manifest.skills.removeAll { $0 == id }
         try writeManagedManifest(manifest, to: manifestURL)
+        disabledSkillKeys.remove(skillKey(id, pluginID: ownerID))
+        persistDisabledSkills()
     }
 
     private func createManagedPlugin(id: String, name: String, description: String, instructions: String?) throws {
@@ -682,7 +713,9 @@ final class AppModel: ObservableObject {
         guard FileManager.default.fileExists(atPath: root.path) else { throw ManagedArtifactError.pluginNotFound(id) }
         try FileManager.default.trashItem(at: root, resultingItemURL: nil)
         disabledPluginIDs.remove(id)
+        disabledSkillKeys = Set(disabledSkillKeys.filter { !$0.hasPrefix(id + ":") })
         persistDisabledPlugins()
+        persistDisabledSkills()
     }
 
     private func setPlugin(id: String, enabled: Bool) throws {
@@ -704,7 +737,51 @@ final class AppModel: ObservableObject {
 
     func removePlugin(_ plugin: InstalledPlugin) {
         do {
-            try removeManagedPlugin(id: plugin.id)
+            guard plugin.manifest.builtIn != true else { throw ManagedArtifactError.builtInProtected }
+            try FileManager.default.trashItem(at: plugin.location, resultingItemURL: nil)
+            disabledPluginIDs.remove(plugin.id)
+            disabledSkillKeys = Set(disabledSkillKeys.filter { !$0.hasPrefix(plugin.id + ":") })
+            persistDisabledPlugins()
+            persistDisabledSkills()
+            activity = "Plugin moved to Trash"
+            Task { await reloadPlugins() }
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    func isSkillEnabled(_ skill: String, in plugin: InstalledPlugin) -> Bool {
+        !disabledSkillKeys.contains(skillKey(skill, pluginID: plugin.id))
+    }
+
+    func setSkill(_ skill: String, in plugin: InstalledPlugin, enabled: Bool) {
+        let key = skillKey(skill, pluginID: plugin.id)
+        if enabled { disabledSkillKeys.remove(key) } else { disabledSkillKeys.insert(key) }
+        persistDisabledSkills()
+        activity = enabled ? "Skill enabled" : "Skill disabled"
+        objectWillChange.send()
+    }
+
+    func removeSkill(_ skill: String, from plugin: InstalledPlugin) {
+        do {
+            guard plugin.manifest.builtIn != true else { throw ManagedArtifactError.builtInProtected }
+            try validateManagedID(skill)
+            let manifestURL = plugin.location.appendingPathComponent("cos.plugin.json")
+            var manifest = try JSONDecoder().decode(CosPluginManifest.self, from: Data(contentsOf: manifestURL))
+            guard manifest.skills.contains(skill) else { throw ManagedArtifactError.skillNotFound(skill) }
+            let candidates = [
+                plugin.location.appendingPathComponent("skills/\(skill)", isDirectory: true),
+                plugin.location.appendingPathComponent(skill, isDirectory: true),
+            ]
+            guard let skillRoot = candidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }) else {
+                throw ManagedArtifactError.skillNotFound(skill)
+            }
+            try FileManager.default.trashItem(at: skillRoot, resultingItemURL: nil)
+            manifest.skills.removeAll { $0 == skill }
+            try writeManagedManifest(manifest, to: manifestURL)
+            disabledSkillKeys.remove(skillKey(skill, pluginID: plugin.id))
+            persistDisabledSkills()
+            activity = "Skill moved to Trash"
             Task { await reloadPlugins() }
         } catch {
             lastError = error.localizedDescription
@@ -733,12 +810,91 @@ final class AppModel: ObservableObject {
         Self.save(Array(disabledPluginIDs).sorted(), key: "disabledPluginIDs")
     }
 
+    private func persistDisabledSkills() {
+        Self.save(Array(disabledSkillKeys).sorted(), key: "disabledSkillKeys")
+    }
+
+    private func skillKey(_ skill: String, pluginID: String) -> String {
+        pluginID + ":" + skill
+    }
+
     func persistPreferences() {
         Self.save(preferences, key: "preferences")
     }
 
     private func normalizedWorkspacePath(_ path: String) -> String {
         URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL.resolvingSymlinksInPath().path
+    }
+
+    private nonisolated static func looksLikeComputerUseRequest(_ prompt: String) -> Bool {
+        let value = prompt.lowercased()
+        if value.contains("@computer") || value.contains("computer use") { return true }
+        let actions = ["open ", "click ", "type ", "send ", "log in", "login", "navigate ", "go to "]
+        let destinations = [" app", "website", "browser", "safari", "chrome", "google", "chat "]
+        return actions.contains(where: value.contains) && destinations.contains(where: value.contains)
+    }
+
+    private func scheduleTitleGeneration(threadID: UUID, prompt: String) {
+        guard let model = selectedTitleModel,
+              let provider = providers.first(where: { $0.id == model.providerID }) else { return }
+        titleTasks.removeValue(forKey: threadID)?.cancel()
+        let workspace = threads.first(where: { $0.id == threadID })?.workspacePath ?? preferences.defaultWorkspace
+        let titlePrompt = """
+        Write a specific 3–7 word task title for this user request. Use plain title case text only: no quotes, no markdown, no period, and no prefix such as “Title:”.
+
+        User request:
+        \(String(prompt.prefix(2_000)))
+        """
+        let titleThread = CosThread(id: threadID, workspacePath: workspace, modelID: model.id, effort: .low)
+        let request = AgentRequest(
+            prompt: titlePrompt,
+            latestUserRequest: titlePrompt,
+            thread: titleThread,
+            model: model,
+            provider: provider,
+            effort: .low,
+            fastMode: false,
+            fullAccess: false,
+            workspaceIsTrusted: true,
+            toolsEnabled: false
+        )
+
+        titleTasks[threadID] = Task { [weak self] in
+            guard let self else { return }
+            do {
+                var output = ""
+                let stream = try runtime.stream(request: request)
+                for try await event in stream {
+                    guard !Task.isCancelled else { return }
+                    if case .textDelta(let text) = event { output += text }
+                }
+                guard let title = Self.cleanGeneratedTitle(output),
+                      let index = threads.firstIndex(where: { $0.id == threadID }) else { return }
+                threads[index].title = title
+                threads[index].updatedAt = Date()
+                persist(threads[index])
+            } catch {
+                guard let index = threads.firstIndex(where: { $0.id == threadID }), threads[index].title == "New task" else { return }
+                threads[index].title = Self.fallbackTitle(for: prompt)
+                persist(threads[index])
+            }
+            titleTasks.removeValue(forKey: threadID)
+        }
+    }
+
+    private nonisolated static func cleanGeneratedTitle(_ raw: String) -> String? {
+        var title = raw.components(separatedBy: .newlines).first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        title = title.replacingOccurrences(of: "(?i)^title\\s*:\\s*", with: "", options: .regularExpression)
+        title = title.trimmingCharacters(in: CharacterSet(charactersIn: "\"'`*_#–—-. "))
+        title = title.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        guard title.count >= 3 else { return nil }
+        return String(title.prefix(54)).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private nonisolated static func fallbackTitle(for prompt: String) -> String {
+        let oneLine = prompt.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return String(oneLine.prefix(54))
     }
 
     private func normalizeLoadedThreadEfforts() {
@@ -761,7 +917,7 @@ final class AppModel: ObservableObject {
         for plugin in plugins where plugin.isEnabled {
             let capabilitySummary = plugin.manifest.capabilities.map { "\($0.id): \($0.description)" }.joined(separator: "\n")
             sections.append("Plugin \(plugin.manifest.id) — \(plugin.manifest.description)\n\(capabilitySummary)")
-            for skill in plugin.manifest.skills where remaining > 0 {
+            for skill in plugin.manifest.skills where remaining > 0 && isSkillEnabled(skill, in: plugin) {
                 let candidates = [
                     plugin.location.appendingPathComponent("skills/\(skill)/SKILL.md"),
                     plugin.location.appendingPathComponent("\(skill)/SKILL.md"),
@@ -830,8 +986,31 @@ final class AppModel: ObservableObject {
             loginStatus[provider.id] = provider.id == "xai"
                 ? "Continue the SuperGrok / X Premium sign-in in Terminal"
                 : "Continue sign-in in Terminal"
+            monitorProviderSignIn(provider)
         } catch {
             loginStatus[provider.id] = "Could not open Terminal: \(error.localizedDescription)"
+        }
+    }
+
+    func refreshProviderSessions() {
+        var sessions: [String: ProviderSessionInfo] = [:]
+        for provider in providers where provider.authMode == .subscription {
+            if let session = runtime.sessionInfo(for: provider) { sessions[provider.id] = session }
+        }
+        providerSessions = sessions
+    }
+
+    private func monitorProviderSignIn(_ provider: ProviderProfile) {
+        Task { [weak self] in
+            for _ in 0..<90 {
+                try? await Task.sleep(for: .seconds(2))
+                guard let self else { return }
+                self.refreshProviderSessions()
+                if let session = self.providerSessions[provider.id] {
+                    self.loginStatus[provider.id] = "Signed in as \(session.displayName)"
+                    return
+                }
+            }
         }
     }
 
@@ -846,8 +1025,8 @@ final class AppModel: ObservableObject {
     func reloadPlugins() async {
         let workspace = selectedThread.map { URL(fileURLWithPath: $0.workspacePath, isDirectory: true) }
         var discovered = await registry.discover(builtInURL: builtInPluginsURL, workspace: workspace)
-        for index in discovered.indices where discovered[index].manifest.builtIn != true {
-            discovered[index].isEnabled = !disabledPluginIDs.contains(discovered[index].id)
+        for index in discovered.indices {
+            discovered[index].isEnabled = discovered[index].id == "codes.ssh.cos.settings" || !disabledPluginIDs.contains(discovered[index].id)
         }
         plugins = discovered
         refreshComputerUseAccess()

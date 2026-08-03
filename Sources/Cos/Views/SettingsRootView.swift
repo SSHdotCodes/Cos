@@ -174,6 +174,20 @@ private struct GeneralSettingsView: View {
                     }
                 }
             }
+            SettingsGroup("Updates") {
+                SettingsRow("Check for Updates", detail: model.updateStatus ?? "Cos \(model.currentAppVersion)") {
+                    if model.isCheckingForUpdate || model.isInstallingUpdate {
+                        ProgressView().controlSize(.small)
+                    } else if let update = model.availableUpdate {
+                        Button("Install \(update.version) & Restart") { model.installAvailableUpdate() }
+                            .buttonStyle(.borderedProminent)
+                    } else {
+                        Button("Check for Updates") {
+                            Task { await model.checkForUpdates(manually: true) }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -184,6 +198,20 @@ private struct ModelSettingsView: View {
 
     var body: some View {
         SettingsPage("Models", subtitle: "Every connected provider appears in the main model selector.") {
+            SettingsGroup("Task naming") {
+                SettingsRow("Title model", detail: "Generates concise task names at Low reasoning") {
+                    Picker("", selection: Binding(
+                        get: { model.selectedTitleModel?.id ?? "chatgpt:gpt-5.6-luna" },
+                        set: { model.preferences.titleModelID = $0; model.persistPreferences() }
+                    )) {
+                        ForEach(model.titleModels) { item in
+                            Text("\(item.name) · Low").tag(item.id)
+                        }
+                    }
+                    .labelsHidden()
+                    .frame(width: 190)
+                }
+            }
             SettingsGroup("Available models") {
                 ForEach(model.models) { item in
                     SettingsRow(item.name, detail: "\(item.model) · \((item.contextWindow / 1_000).formatted())K context") {
@@ -256,6 +284,21 @@ private struct ProviderCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
+            if let session = model.providerSessions[provider.id] {
+                VStack(spacing: 5) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(.green)
+                    Text(session.displayName)
+                        .font(.system(size: 11.5, weight: .semibold))
+                        .lineLimit(1)
+                    Text("Connected")
+                        .font(.system(size: 9.5, weight: .medium))
+                        .foregroundStyle(.green)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 3)
+            }
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(provider.name).font(.system(size: 13.5, weight: .semibold))
@@ -264,7 +307,15 @@ private struct ProviderCard: View {
                 }
                 Spacer()
                 if provider.authMode == .subscription {
-                    Button("Sign in") { model.signIn(to: provider) }.buttonStyle(.borderedProminent)
+                    if model.providerSessions[provider.id] != nil {
+                        HStack(spacing: 7) {
+                            Button("Switch Account…") { model.signIn(to: provider) }
+                            Button("Refresh Token…") { model.signIn(to: provider) }
+                                .buttonStyle(.borderedProminent)
+                        }
+                    } else {
+                        Button("Sign In…") { model.signIn(to: provider) }.buttonStyle(.borderedProminent)
+                    }
                 } else if provider.authMode == .local {
                     Text("Local").font(.caption).foregroundStyle(.secondary)
                 }
@@ -286,6 +337,7 @@ private struct ProviderCard: View {
         }
         .padding(14)
         .background(.primary.opacity(0.045), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .onAppear { model.refreshProviderSessions() }
     }
 }
 
@@ -405,17 +457,6 @@ private struct AdvancedSettingsView: View {
         SettingsPage("Advanced", subtitle: "Diagnostics and catalog controls for experienced users.") {
             SettingsGroup("Runtime") {
                 SettingsRow("Harness activity", detail: model.activity) { Circle().fill(model.isRunning ? .green : .secondary).frame(width: 7, height: 7) }
-                SettingsRow("Software update", detail: model.updateStatus ?? "Cos \(model.currentAppVersion)") {
-                    if model.isCheckingForUpdate || model.isInstallingUpdate {
-                        ProgressView().controlSize(.small)
-                    } else if let update = model.availableUpdate {
-                        Button("Install \(update.version) & Restart") { model.installAvailableUpdate() }
-                    } else {
-                        Button("Check Now") {
-                            Task { await model.checkForUpdates(manually: true) }
-                        }
-                    }
-                }
                 SettingsRow("Marketplace") { Link("cos.ssh.codes", destination: URL(string: "https://cos.ssh.codes")!) }
                 SettingsRow("Reset provider catalog", detail: "Restore Cos defaults without deleting Keychain secrets") { Button("Reset") { model.resetCatalog() } }
             }

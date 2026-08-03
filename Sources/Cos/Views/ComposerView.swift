@@ -8,6 +8,9 @@ struct ComposerView: View {
     @State private var text = ""
     @State private var modelPopover = false
     @State private var editorFocused = false
+    @State private var selectionUTF16Offset = 0
+    @State private var selectedSuggestionIndex = 0
+    @State private var dismissedSuggestionSignature: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -52,7 +55,16 @@ struct ComposerView: View {
                         .padding(.top, 9)
                         .allowsHitTesting(false)
                 }
-                AgentTextEditor(text: $text, isFocused: $editorFocused, onSubmit: submit)
+                AgentTextEditor(
+                    text: $text,
+                    isFocused: $editorFocused,
+                    selectionUTF16Offset: $selectionUTF16Offset,
+                    suggestionsVisible: !referenceSuggestions.isEmpty,
+                    onMoveSuggestion: moveSuggestion,
+                    onAcceptSuggestion: acceptSelectedSuggestion,
+                    onDismissSuggestions: dismissSuggestions,
+                    onSubmit: submit
+                )
                     .padding(.horizontal, 9)
                     .frame(height: editorHeight)
             }
@@ -137,9 +149,77 @@ struct ComposerView: View {
             .padding(.bottom, 7)
         }
         .glassCard(cornerRadius: CosTheme.composerRadius, trueDark: model.preferences.appearance == .trueDark)
+        .overlay(alignment: .topLeading) {
+            if !referenceSuggestions.isEmpty {
+                referenceSuggestionMenu
+                    .padding(.horizontal, 10)
+                    .offset(y: -referenceSuggestionMenuHeight - 8)
+                    .transition(.opacity.combined(with: .scale(scale: 0.985, anchor: .bottomLeading)))
+                    .zIndex(20)
+            }
+        }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: model.preferences.fastMode)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.11), value: referenceQuery?.signature)
+        .onChange(of: referenceQuery?.signature) { _, _ in
+            selectedSuggestionIndex = 0
+        }
         .frame(maxWidth: 820)
         .frame(maxWidth: .infinity)
+        .zIndex(10)
+    }
+
+    private var referenceQuery: ComposerReferenceQuery? {
+        ComposerReferenceResolver.query(in: text, selectionUTF16Offset: selectionUTF16Offset)
+    }
+
+    private var referenceSuggestions: [ComposerReferenceSuggestion] {
+        guard let query = referenceQuery, query.signature != dismissedSuggestionSignature else { return [] }
+        let plugins = model.plugins.map { plugin in
+            var visible = plugin
+            visible.manifest.skills = plugin.manifest.skills.filter { model.isSkillEnabled($0, in: plugin) }
+            return visible
+        }
+        return ComposerReferenceResolver.suggestions(for: query, plugins: plugins)
+    }
+
+    private var referenceSuggestionMenuHeight: CGFloat {
+        CGFloat(referenceSuggestions.count) * 40 + 12
+    }
+
+    private var referenceSuggestionMenu: some View {
+        VStack(spacing: 2) {
+            ForEach(Array(referenceSuggestions.enumerated()), id: \.element.id) { index, suggestion in
+                Button { acceptSuggestion(at: index) } label: {
+                    HStack(spacing: 9) {
+                        Image(systemName: suggestion.kind == .plugin ? "shippingbox" : suggestion.kind == .skill ? "wand.and.stars" : "chevron.forward")
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundStyle(index == selectedSuggestionIndex ? CosTheme.blue : .secondary)
+                            .frame(width: 16)
+                        Text(suggestion.title)
+                            .font(.system(size: 12, weight: .semibold))
+                            .lineLimit(1)
+                        Text(suggestion.detail)
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Spacer(minLength: 8)
+                        Text(suggestion.kind.title.uppercased())
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal, 10)
+                    .frame(height: 38)
+                    .background(index == selectedSuggestionIndex ? CosTheme.blue.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(6)
+        .frame(maxWidth: 520)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.primary.opacity(0.1), lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.22), radius: 18, y: 8)
     }
 
     private var editorHeight: CGFloat {
@@ -152,13 +232,44 @@ struct ComposerView: View {
         let prompt = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty, !model.isRunning else { return }
         text = ""
+        selectionUTF16Offset = 0
+        dismissedSuggestionSignature = nil
         model.send(prompt)
+    }
+
+    private func moveSuggestion(_ offset: Int) {
+        guard !referenceSuggestions.isEmpty else { return }
+        selectedSuggestionIndex = (selectedSuggestionIndex + offset + referenceSuggestions.count) % referenceSuggestions.count
+    }
+
+    private func acceptSelectedSuggestion() {
+        acceptSuggestion(at: selectedSuggestionIndex)
+    }
+
+    private func acceptSuggestion(at index: Int) {
+        guard let query = referenceQuery, referenceSuggestions.indices.contains(index) else { return }
+        let suggestion = referenceSuggestions[index]
+        let replacement = ComposerReferenceResolver.replacingQuery(in: text, query: query, with: suggestion.insertion)
+        text = replacement.text
+        selectionUTF16Offset = replacement.selectionUTF16Offset
+        selectedSuggestionIndex = 0
+        dismissedSuggestionSignature = nil
+        editorFocused = true
+    }
+
+    private func dismissSuggestions() {
+        dismissedSuggestionSignature = referenceQuery?.signature
     }
 }
 
 private struct AgentTextEditor: NSViewRepresentable {
     @Binding var text: String
     @Binding var isFocused: Bool
+    @Binding var selectionUTF16Offset: Int
+    let suggestionsVisible: Bool
+    let onMoveSuggestion: (Int) -> Void
+    let onAcceptSuggestion: () -> Void
+    let onDismissSuggestions: () -> Void
     let onSubmit: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
@@ -176,6 +287,10 @@ private struct AgentTextEditor: NSViewRepresentable {
         let textView = CommandTextView()
         textView.delegate = context.coordinator
         textView.submit = onSubmit
+        textView.suggestionsVisible = suggestionsVisible
+        textView.moveSuggestion = onMoveSuggestion
+        textView.acceptSuggestion = onAcceptSuggestion
+        textView.dismissSuggestions = onDismissSuggestions
         textView.string = text
         textView.drawsBackground = false
         textView.backgroundColor = .clear
@@ -205,9 +320,18 @@ private struct AgentTextEditor: NSViewRepresentable {
         guard let textView = scrollView.documentView as? CommandTextView else { return }
         context.coordinator.parent = self
         textView.submit = onSubmit
+        textView.suggestionsVisible = suggestionsVisible
+        textView.moveSuggestion = onMoveSuggestion
+        textView.acceptSuggestion = onAcceptSuggestion
+        textView.dismissSuggestions = onDismissSuggestions
         if textView.string != text {
             textView.string = text
-            textView.setSelectedRange(NSRange(location: text.utf16.count, length: 0))
+            let location = min(selectionUTF16Offset, text.utf16.count)
+            textView.setSelectedRange(NSRange(location: location, length: 0))
+        } else if textView.selectedRange().length == 0,
+                  textView.selectedRange().location != selectionUTF16Offset,
+                  selectionUTF16Offset <= text.utf16.count {
+            textView.setSelectedRange(NSRange(location: selectionUTF16Offset, length: 0))
         }
         if isFocused, textView.window?.firstResponder !== textView {
             textView.window?.makeFirstResponder(textView)
@@ -224,17 +348,45 @@ private struct AgentTextEditor: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             parent.text = textView.string
+            parent.selectionUTF16Offset = textView.selectedRange().location
+        }
+
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            parent.selectionUTF16Offset = textView.selectedRange().location
         }
     }
 }
 
 private final class CommandTextView: NSTextView {
     var submit: (() -> Void)?
+    var suggestionsVisible = false
+    var moveSuggestion: ((Int) -> Void)?
+    var acceptSuggestion: (() -> Void)?
+    var dismissSuggestions: (() -> Void)?
 
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 36, event.modifierFlags.contains(.command) {
             submit?()
             return
+        }
+        if suggestionsVisible {
+            switch event.keyCode {
+            case 125:
+                moveSuggestion?(1)
+                return
+            case 126:
+                moveSuggestion?(-1)
+                return
+            case 36, 48:
+                acceptSuggestion?()
+                return
+            case 53:
+                dismissSuggestions?()
+                return
+            default:
+                break
+            }
         }
         super.keyDown(with: event)
     }

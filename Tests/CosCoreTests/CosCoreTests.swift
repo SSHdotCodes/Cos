@@ -107,6 +107,49 @@ final class CosCoreTests: XCTestCase {
         XCTAssertEqual(opus.effortOptions, [.low, .medium, .high, .extraHigh, .max])
         let sol = try XCTUnwrap(DefaultCatalog.models.first { $0.id == "chatgpt:gpt-5.6-sol" })
         XCTAssertTrue(sol.supportsFastMode)
+
+        let luna = try XCTUnwrap(DefaultCatalog.models.first { $0.id == "chatgpt:gpt-5.6-luna" })
+        XCTAssertEqual(luna.effortOptions, [.low])
+        let haiku = try XCTUnwrap(DefaultCatalog.models.first { $0.id == "anthropic:claude-haiku-4.5" })
+        XCTAssertEqual(haiku.effortOptions, [.low])
+    }
+
+    func testComposerReferenceSuggestionsIncludeCommandsSkillsAndPlugins() throws {
+        let manifest = CosPluginManifest(
+            schemaVersion: 1,
+            id: "codes.ssh.cos.computer-use",
+            name: "Computer Use",
+            version: "1.0.0",
+            author: "Cos",
+            description: "Operate Mac apps",
+            capabilities: [],
+            skills: ["computer-use"],
+            homepage: nil,
+            builtIn: true
+        )
+        let plugin = InstalledPlugin(manifest: manifest, location: URL(fileURLWithPath: "/tmp/computer-use"), isTrusted: true, isEnabled: true)
+
+        let slashQuery = try XCTUnwrap(ComposerReferenceResolver.query(in: "/", selectionUTF16Offset: 1))
+        let slashSuggestions = ComposerReferenceResolver.suggestions(for: slashQuery, plugins: [plugin])
+        XCTAssertTrue(slashSuggestions.contains { $0.title == "/goal" })
+        XCTAssertTrue(slashSuggestions.contains { $0.title == "/computer-use" })
+
+        let pluginQuery = try XCTUnwrap(ComposerReferenceResolver.query(in: "@comp", selectionUTF16Offset: 5))
+        let pluginSuggestions = ComposerReferenceResolver.suggestions(for: pluginQuery, plugins: [plugin])
+        XCTAssertEqual(pluginSuggestions.first?.title, "@computer-use")
+
+        let replacement = try XCTUnwrap(pluginSuggestions.first).insertion
+        let updated = ComposerReferenceResolver.replacingQuery(in: "Use @comp", query: .init(trigger: "@", term: "comp", rangeLocation: 4, rangeLength: 5), with: replacement)
+        XCTAssertEqual(updated.text, "Use @computer-use ")
+        XCTAssertEqual(updated.selectionUTF16Offset, 18)
+    }
+
+    func testOlderPreferencesDecodeWithoutTitleModel() throws {
+        let json = """
+        {"appearance":"system","fastMode":false,"fullAccess":true,"autoCompact":true,"compactAtPercent":78,"keepRecentTokens":20000,"showTokenUsage":false,"animateStreaming":true,"defaultWorkspace":"/tmp","selectedModelID":"chatgpt:gpt-5.6-sol","defaultEffort":"high"}
+        """
+        let preferences = try JSONDecoder().decode(AppPreferences.self, from: Data(json.utf8))
+        XCTAssertNil(preferences.titleModelID)
     }
 
     func testComputerUseCanListForegroundApplicationsWithoutRetainedState() throws {

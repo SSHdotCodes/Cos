@@ -23,10 +23,26 @@ public enum AgentRuntimeError: LocalizedError {
 public struct AgentCredential: Sendable {
     public var token: String
     public var accountID: String?
+    public var email: String?
 
-    public init(token: String, accountID: String? = nil) {
+    public init(token: String, accountID: String? = nil, email: String? = nil) {
         self.token = token
         self.accountID = accountID
+        self.email = email
+    }
+}
+
+public struct ProviderSessionInfo: Equatable, Sendable {
+    public var email: String?
+    public var accountID: String?
+
+    public init(email: String? = nil, accountID: String? = nil) {
+        self.email = email
+        self.accountID = accountID
+    }
+
+    public var displayName: String {
+        email ?? accountID ?? "Connected subscription"
     }
 }
 
@@ -68,6 +84,12 @@ public struct AgentRuntime: Sendable {
         guard let credential else { throw AgentRuntimeError.missingAPIKey(request.provider.name) }
         return harness.stream(request: routedRequest, credential: credential)
     }
+
+    public func sessionInfo(for provider: ProviderProfile) -> ProviderSessionInfo? {
+        guard provider.authMode == .subscription,
+              let credential = try? credentials.subscriptionCredential(for: provider) else { return nil }
+        return ProviderSessionInfo(email: credential.email, accountID: credential.accountID)
+    }
 }
 
 private struct LocalSubscriptionCredentialResolver: Sendable {
@@ -95,7 +117,11 @@ private struct LocalSubscriptionCredentialResolver: Sendable {
               let access = tokens["access_token"] as? String,
               !access.isEmpty else { return nil }
         let account = (tokens["account_id"] as? String) ?? accountID(fromJWT: access)
-        return AgentCredential(token: access, accountID: account)
+        let idToken = tokens["id_token"] as? String
+        let email = findString(named: "email", in: root)
+            ?? idToken.flatMap { string(named: "email", inJWT: $0) }
+            ?? string(named: "email", inJWT: access)
+        return AgentCredential(token: access, accountID: account, email: email)
     }
 
     private func openCodeCredential(named name: String) -> AgentCredential? {
@@ -103,7 +129,9 @@ private struct LocalSubscriptionCredentialResolver: Sendable {
         guard let root = json(at: url), let entry = root[name] as? [String: Any] else { return nil }
         for key in ["access", "token", "key"] {
             if let token = entry[key] as? String, !token.isEmpty {
-                return AgentCredential(token: token, accountID: entry["accountId"] as? String)
+                let account = (entry["accountId"] as? String) ?? accountID(fromJWT: token)
+                let email = (entry["email"] as? String) ?? string(named: "email", inJWT: token)
+                return AgentCredential(token: token, accountID: account, email: email)
             }
         }
         return nil
@@ -112,7 +140,13 @@ private struct LocalSubscriptionCredentialResolver: Sendable {
     private func credentialFromJSON(at url: URL, preferredKeys: [String]) -> AgentCredential? {
         guard let object = json(at: url) else { return nil }
         for key in preferredKeys {
-            if let token = findString(named: key, in: object) { return AgentCredential(token: token) }
+            if let token = findString(named: key, in: object) {
+                return AgentCredential(
+                    token: token,
+                    accountID: findString(named: "account_id", in: object) ?? accountID(fromJWT: token),
+                    email: findString(named: "email", in: object) ?? string(named: "email", inJWT: token)
+                )
+            }
         }
         return nil
     }
@@ -137,14 +171,24 @@ private struct LocalSubscriptionCredentialResolver: Sendable {
     }
 
     private func accountID(fromJWT token: String) -> String? {
+        guard let payload = jwtPayload(token) else { return nil }
+        if let auth = payload["https://api.openai.com/auth"] as? [String: Any],
+           let account = auth["chatgpt_account_id"] as? String { return account }
+        return payload["chatgpt_account_id"] as? String ?? payload["account_id"] as? String
+    }
+
+    private func string(named name: String, inJWT token: String) -> String? {
+        guard let payload = jwtPayload(token) else { return nil }
+        return findString(named: name, in: payload)
+    }
+
+    private func jwtPayload(_ token: String) -> [String: Any]? {
         let parts = token.split(separator: ".")
         guard parts.count == 3 else { return nil }
         var encoded = String(parts[1]).replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
         encoded += String(repeating: "=", count: (4 - encoded.count % 4) % 4)
         guard let data = Data(base64Encoded: encoded),
               let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        if let auth = payload["https://api.openai.com/auth"] as? [String: Any],
-           let account = auth["chatgpt_account_id"] as? String { return account }
-        return payload["chatgpt_account_id"] as? String
+        return payload
     }
 }
