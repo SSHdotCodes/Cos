@@ -2,7 +2,7 @@
   "version": "1.0.0",
   "build": 100,
   "downloadURL": "https://cos.ssh.codes/downloads/Cos-1.0.0-macOS-arm64.zip?v=1",
-  "sha256": "d8fcb4343c5651e71e189d3c00dd2b49c2563442781705b012e882e067a58504",
+  "sha256": "5f80f35f6fcd075afe7298e98eb3f6c7db1f21ecc8cb4253c046e1591c74a191",
   "minimumSystemVersion": "15.0",
   "releaseNotes": "Cos 1.0 brings the native provider-neutral harness, persistent goals and compaction, model-aware reasoning controls, a built-in marketplace, Computer Use, guarded self-management, skill import, and verified one-click updates."
 }

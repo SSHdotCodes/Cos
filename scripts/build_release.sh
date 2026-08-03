@@ -20,11 +20,12 @@ trap cleanup EXIT
 
 mkdir -p "$OUTPUT_DIR" "$APP_DIR/Contents/MacOS" "$APP_DIR/Contents/Resources"
 swift build --package-path "$ROOT_DIR" --scratch-path "$BUILD_DIR" -c release
+BIN_DIR="$(swift build --package-path "$ROOT_DIR" --scratch-path "$BUILD_DIR" -c release --show-bin-path)"
 
-cp "$BUILD_DIR/out/Products/Release/Cos" "$APP_DIR/Contents/MacOS/Cos"
+cp "$BIN_DIR/Cos" "$APP_DIR/Contents/MacOS/Cos"
 cp "$ROOT_DIR/scripts/Cos-Info.plist" "$APP_DIR/Contents/Info.plist"
 
-RESOURCE_BUNDLE="$(find "$BUILD_DIR/out/Products/Release" -maxdepth 1 -name 'Cos_Cos.bundle' -print -quit)"
+RESOURCE_BUNDLE="$(find "$BIN_DIR" -maxdepth 1 -name 'Cos_Cos.bundle' -print -quit)"
 if [[ -n "$RESOURCE_BUNDLE" ]]; then
   cp -R "$RESOURCE_BUNDLE" "$APP_DIR/Contents/Resources/"
 fi
