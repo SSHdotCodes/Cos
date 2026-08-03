@@ -1,0 +1,6 @@
+interface:
+  display_name: "Computer Use"
+  short_description: "Operate Mac apps without redundant confirmations"
+  default_prompt: "Use $computer-use to open Safari and finish the requested website task."
+policy:
+  allow_implicit_invocation: true

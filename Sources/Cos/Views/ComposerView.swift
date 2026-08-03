@@ -1,0 +1,424 @@
+import AppKit
+import CosCore
+import SwiftUI
+
+struct ComposerView: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var text = ""
+    @State private var modelPopover = false
+    @State private var editorFocused = false
+
+    var body: some View {
+        VStack(spacing: 0) {
+            if let request = model.pendingDirectoryTrust,
+               request.threadID == model.selectedThreadID {
+                HStack(spacing: 9) {
+                    Image(systemName: "folder.badge.questionmark")
+                        .font(.system(size: 14, weight: .medium))
+                        .foregroundStyle(CosTheme.orange)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Trust \(URL(fileURLWithPath: request.workspacePath).lastPathComponent)?")
+                            .font(.system(size: 12, weight: .semibold))
+                        Text("Allow Codex to work in this directory from now on.")
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(.secondary)
+                    }
+                    .lineLimit(1)
+                    .help(request.workspacePath)
+                    Spacer(minLength: 8)
+                    Button("Not now") { model.declinePendingWorkspaceTrust() }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 9)
+                        .frame(height: 27)
+                    Button("Trust & continue") { model.trustPendingWorkspaceAndContinue() }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .tint(CosTheme.blue)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                Divider().opacity(0.45)
+            }
+
+            ZStack(alignment: .topLeading) {
+                if text.isEmpty {
+                    Text("Ask Cos to build, inspect, fix, or run anything…")
+                        .font(.system(size: 13))
+                        .foregroundStyle(.tertiary)
+                        .padding(.horizontal, 14)
+                        .padding(.top, 9)
+                        .allowsHitTesting(false)
+                }
+                AgentTextEditor(text: $text, isFocused: $editorFocused, onSubmit: submit)
+                    .padding(.horizontal, 9)
+                    .frame(height: editorHeight)
+            }
+
+            HStack(spacing: 7) {
+                Menu {
+                    Button("Choose workspace…", systemImage: "folder") { model.chooseWorkspace() }
+                    Button("New task", systemImage: "plus.bubble") { model.newThread() }
+                    Divider()
+                    Button("Plugin library…", systemImage: "shippingbox") { model.isPluginLibraryPresented = true }
+                } label: {
+                    Image(systemName: "plus")
+                        .font(.system(size: 13, weight: .medium))
+                        .frame(width: 28, height: 28)
+                }
+                .menuStyle(.borderlessButton)
+                .menuIndicator(.hidden)
+                .fixedSize()
+
+                Button { model.preferences.fullAccess.toggle(); model.persistPreferences() } label: {
+                    Label(model.preferences.fullAccess ? "Full access" : "Workspace", systemImage: model.preferences.fullAccess ? "shield.lefthalf.filled" : "folder.badge.gearshape")
+                        .font(.system(size: 11.5, weight: .medium))
+                        .foregroundStyle(model.preferences.fullAccess ? CosTheme.orange : .secondary)
+                        .padding(.horizontal, 8)
+                        .frame(height: 28)
+                        .background(.primary.opacity(0.05), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .help("Toggle agent file access")
+
+                Spacer(minLength: 4)
+
+                Button { modelPopover.toggle() } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "bolt.fill")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(CosTheme.blue)
+                            .frame(width: 10)
+                            .opacity(model.selectedModel.supportsFastMode && model.preferences.fastMode ? 1 : 0)
+                        Text(model.selectedModel.name)
+                            .lineLimit(1)
+                            .frame(width: 64, alignment: .trailing)
+                        Text(model.selectedThread?.effort.shortTitle ?? model.preferences.defaultEffort.shortTitle)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .frame(width: 58, alignment: .trailing)
+                        Image(systemName: "chevron.down")
+                            .font(.system(size: 8, weight: .semibold))
+                            .foregroundStyle(.secondary)
+                    }
+                    .font(.system(size: 11.5, weight: .medium))
+                    .padding(.horizontal, 9)
+                    .frame(height: 28)
+                    .frame(width: 176)
+                    .background(.primary.opacity(0.055), in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .popover(isPresented: $modelPopover, arrowEdge: .bottom) {
+                    ModelPickerView(isPresented: $modelPopover)
+                        .environmentObject(model)
+                }
+
+                Button { editorFocused = true } label: {
+                    Image(systemName: "mic")
+                        .font(.system(size: 12))
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .help("Use macOS Dictation")
+
+                Button { model.isRunning ? model.cancel() : submit() } label: {
+                    Image(systemName: model.isRunning ? "stop.fill" : "arrow.up")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(model.isRunning || !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? Color(nsColor: .windowBackgroundColor) : .secondary)
+                        .frame(width: 29, height: 29)
+                        .background(model.isRunning || !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? AnyShapeStyle(.primary) : AnyShapeStyle(.primary.opacity(0.11)), in: Circle())
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.return, modifiers: .command)
+            }
+            .padding(.horizontal, 8)
+            .padding(.bottom, 7)
+        }
+        .glassCard(cornerRadius: CosTheme.composerRadius, trueDark: model.preferences.appearance == .trueDark)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: model.preferences.fastMode)
+        .frame(maxWidth: 820)
+        .frame(maxWidth: .infinity)
+    }
+
+    private var editorHeight: CGFloat {
+        let explicitLines = text.reduce(1) { count, character in count + (character == "\n" ? 1 : 0) }
+        let wrappedLines = max(0, text.count / 88)
+        return min(132, max(46, CGFloat(explicitLines + wrappedLines) * 18 + 28))
+    }
+
+    private func submit() {
+        let prompt = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty, !model.isRunning else { return }
+        text = ""
+        model.send(prompt)
+    }
+}
+
+private struct AgentTextEditor: NSViewRepresentable {
+    @Binding var text: String
+    @Binding var isFocused: Bool
+    let onSubmit: () -> Void
+
+    func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
+
+    func makeNSView(context: Context) -> NSScrollView {
+        let scrollView = NSScrollView()
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.hasVerticalScroller = false
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.verticalScrollElasticity = .none
+        scrollView.horizontalScrollElasticity = .none
+
+        let textView = CommandTextView()
+        textView.delegate = context.coordinator
+        textView.submit = onSubmit
+        textView.string = text
+        textView.drawsBackground = false
+        textView.backgroundColor = .clear
+        textView.isRichText = false
+        textView.importsGraphics = false
+        textView.allowsUndo = true
+        textView.isAutomaticQuoteSubstitutionEnabled = false
+        textView.isAutomaticDashSubstitutionEnabled = false
+        textView.isHorizontallyResizable = false
+        textView.isVerticallyResizable = true
+        textView.autoresizingMask = [.width]
+        textView.font = .systemFont(ofSize: 13.2)
+        textView.textColor = .labelColor
+        textView.insertionPointColor = .controlAccentColor
+        textView.textContainerInset = NSSize(width: 5, height: 8)
+        textView.minSize = .zero
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.setAccessibilityLabel("Message Cos")
+        scrollView.documentView = textView
+        return scrollView
+    }
+
+    func updateNSView(_ scrollView: NSScrollView, context: Context) {
+        guard let textView = scrollView.documentView as? CommandTextView else { return }
+        context.coordinator.parent = self
+        textView.submit = onSubmit
+        if textView.string != text {
+            textView.string = text
+            textView.setSelectedRange(NSRange(location: text.utf16.count, length: 0))
+        }
+        if isFocused, textView.window?.firstResponder !== textView {
+            textView.window?.makeFirstResponder(textView)
+        }
+    }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: AgentTextEditor
+
+        init(parent: AgentTextEditor) { self.parent = parent }
+
+        func textDidBeginEditing(_ notification: Notification) { parent.isFocused = true }
+        func textDidEndEditing(_ notification: Notification) { parent.isFocused = false }
+        func textDidChange(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            parent.text = textView.string
+        }
+    }
+}
+
+private final class CommandTextView: NSTextView {
+    var submit: (() -> Void)?
+
+    override func keyDown(with event: NSEvent) {
+        if event.keyCode == 36, event.modifierFlags.contains(.command) {
+            submit?()
+            return
+        }
+        super.keyDown(with: event)
+    }
+}
+
+private struct ModelPickerView: View {
+    @EnvironmentObject private var model: AppModel
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Binding var isPresented: Bool
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Model & reasoning").font(.system(size: 13, weight: .semibold))
+                    Text(model.selectedProvider.name).font(.system(size: 10.5)).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if model.selectedModel.supportsFastMode {
+                    Button { model.preferences.fastMode.toggle(); model.persistPreferences() } label: {
+                        Image(systemName: "bolt.fill")
+                            .foregroundStyle(model.preferences.fastMode ? CosTheme.blue : .secondary)
+                            .frame(width: 27, height: 27)
+                            .background(.primary.opacity(0.055), in: Circle())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Fast mode")
+                } else {
+                    Color.clear.frame(width: 27, height: 27)
+                }
+            }
+            .padding(13)
+
+            Divider()
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 4) {
+                    ForEach(model.providers.filter(\.isEnabled)) { provider in
+                        let providerModels = model.models.filter { $0.providerID == provider.id }
+                        if !providerModels.isEmpty {
+                            Text(provider.name.uppercased())
+                                .font(.system(size: 9.5, weight: .semibold))
+                                .foregroundStyle(.tertiary)
+                                .padding(.horizontal, 10)
+                                .padding(.top, 8)
+                            ForEach(providerModels) { item in
+                                Button {
+                                    model.selectModel(item)
+                                } label: {
+                                    HStack {
+                                        VStack(alignment: .leading, spacing: 2) {
+                                            Text(item.name).font(.system(size: 12.5, weight: .medium))
+                                            Text(item.model).font(.system(size: 9.5)).foregroundStyle(.secondary)
+                                        }
+                                        Spacer()
+                                        if model.selectedModel.id == item.id {
+                                            Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)).foregroundStyle(CosTheme.blue)
+                                        }
+                                    }
+                                    .contentShape(Rectangle())
+                                    .padding(.horizontal, 10)
+                                    .frame(height: 38)
+                                    .background(model.selectedModel.id == item.id ? CosTheme.blue.opacity(0.09) : .clear, in: RoundedRectangle(cornerRadius: 8))
+                                }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                    }
+                }
+                .padding(7)
+            }
+            .frame(height: 238)
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Reasoning effort").font(.system(size: 11.5, weight: .medium))
+                    Spacer()
+                    Text(model.selectedThread?.effort.title ?? "High")
+                        .font(.system(size: 11.5))
+                        .foregroundStyle(.secondary)
+                        .frame(width: 64, alignment: .trailing)
+                }
+                EffortSlider(
+                    selection: Binding(
+                        get: { model.selectedThread?.effort ?? model.preferences.defaultEffort },
+                        set: { model.setEffort($0) }
+                    ),
+                    options: model.selectedModel.effortOptions
+                )
+                .id(model.selectedModel.id)
+                Group {
+                    if model.selectedModel.supportsFastMode {
+                        HStack(alignment: .center, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Label("Fast mode", systemImage: "bolt.fill").font(.system(size: 11.5, weight: .medium))
+                                Text("Prefer the provider’s lower-latency route").font(.system(size: 9.5)).foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 8)
+                            Toggle("Fast mode", isOn: Binding(
+                                get: { model.preferences.fastMode },
+                                set: { model.preferences.fastMode = $0; model.persistPreferences() }
+                            ))
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .controlSize(.small)
+                            .fixedSize()
+                        }
+                    } else {
+                        HStack(alignment: .center, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Label("Standard latency", systemImage: "clock").font(.system(size: 11.5, weight: .medium))
+                                Text("Fast mode isn’t offered for this model").font(.system(size: 9.5)).foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 8)
+                        }
+                    }
+                }
+                .frame(minHeight: 30, alignment: .center)
+            }
+            .padding(13)
+        }
+        .frame(width: 330)
+    }
+}
+
+struct EffortSlider: View {
+    @Binding var selection: ReasoningEffort
+    let options: [ReasoningEffort]
+    @State private var dragPosition: CGFloat?
+
+    var body: some View {
+        GeometryReader { geometry in
+            let count = max(options.count, 2)
+            let inset: CGFloat = 14
+            let usable = geometry.size.width - inset * 2
+            let step = usable / CGFloat(count - 1)
+            let selectedIndex = options.firstIndex(of: selection) ?? 0
+            let selectedPosition = inset + CGFloat(selectedIndex) * step
+            let thumbPosition = dragPosition ?? selectedPosition
+            ZStack(alignment: .leading) {
+                Capsule().fill(.primary.opacity(0.12)).frame(height: 24)
+                Capsule()
+                    .fill(LinearGradient(colors: [CosTheme.blue, CosTheme.violet], startPoint: .leading, endPoint: .trailing))
+                    .frame(width: thumbPosition, height: 24)
+                ForEach(options.indices, id: \.self) { index in
+                    Circle()
+                        .fill(index <= selectedIndex ? .white.opacity(0.65) : .secondary.opacity(0.55))
+                        .frame(width: 4, height: 4)
+                        .position(x: inset + CGFloat(index) * step, y: 14)
+                }
+                Circle()
+                    .fill(.white)
+                    .frame(width: 28, height: 28)
+                    .shadow(color: .black.opacity(0.16), radius: 3, y: 1)
+                    .position(x: thumbPosition, y: 14)
+            }
+            .contentShape(Rectangle())
+            .gesture(DragGesture(minimumDistance: 0).onChanged { value in
+                let position = min(max(value.location.x, inset), geometry.size.width - inset)
+                dragPosition = position
+                let raw = Int(round((position - inset) / max(step, 1)))
+                let index = min(max(raw, 0), options.count - 1)
+                guard options.indices.contains(index), selection != options[index] else { return }
+                var transaction = Transaction()
+                transaction.disablesAnimations = true
+                withTransaction(transaction) { selection = options[index] }
+            }.onEnded { _ in
+                withAnimation(.easeOut(duration: 0.17)) { dragPosition = nil }
+            })
+            .animation(dragPosition == nil ? .easeInOut(duration: 0.17) : nil, value: selection)
+        }
+        .frame(height: 28)
+        .accessibilityElement()
+        .accessibilityLabel("Reasoning effort")
+        .accessibilityValue(selection.title)
+        .accessibilityAdjustableAction { direction in
+            guard let index = options.firstIndex(of: selection) else { return }
+            switch direction {
+            case .increment: selection = options[min(index + 1, options.count - 1)]
+            case .decrement: selection = options[max(index - 1, 0)]
+            @unknown default: break
+            }
+        }
+    }
+}

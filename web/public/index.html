@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Cos is a fast, native macOS workspace for coding agents, models, goals, plugins, and skills.">
+  <meta name="theme-color" content="#080a12">
+  <title>Cos — one native home for your coding agents</title>
+  <link rel="icon" href="/assets/cos-icon.png?v=2">
+  <link rel="stylesheet" href="/styles.css">
+  <script type="module" src="/app.js"></script>
+</head>
+<body>
+  <header class="nav shell">
+    <a class="brand" href="#top" aria-label="Cos home"><img src="/assets/cos-icon.png?v=2" alt="cosine theta"></a>
+    <nav aria-label="Main navigation"><a href="#product">Product</a><a href="#marketplace">Plugins</a><a href="#publish">Publish</a><a href="https://github.com/SSHDotCodes/Cos">GitHub ↗</a></nav>
+    <a class="nav-download" href="/downloads/Cos-1.0.0.dmg?v=1">Download <span>↓</span></a>
+  </header>
+
+  <main id="top">
+    <section class="hero shell" id="product">
+      <div class="hero-copy">
+        <div class="eyebrow"><span></span> Open-source native macOS agent</div>
+        <h1>Your agents.<br><em>One quiet workspace.</em></h1>
+        <p class="lead">Cos combines a polished native interface, persistent goals, compact context, and one fast provider-neutral harness—with native Computer Use and portable skills, without keeping a browser runtime alive.</p>
+        <div class="hero-actions">
+          <a class="button primary" href="/downloads/Cos-1.0.0.dmg?v=1">Download Cos 1.0 <span>↓</span></a>
+          <a class="button secondary github-button" href="https://github.com/SSHDotCodes/Cos" aria-label="View Cos on GitHub"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 .7a11.5 11.5 0 0 0-3.64 22.41c.58.11.79-.25.79-.56v-2.24c-3.22.7-3.9-1.37-3.9-1.37-.53-1.34-1.29-1.7-1.29-1.7-1.05-.72.08-.71.08-.71 1.17.08 1.78 1.2 1.78 1.2 1.04 1.78 2.72 1.27 3.38.97.1-.75.4-1.27.74-1.56-2.57-.29-5.27-1.29-5.27-5.68 0-1.25.45-2.28 1.19-3.08-.12-.29-.52-1.46.11-3.04 0 0 .97-.31 3.16 1.18a10.9 10.9 0 0 1 5.76 0c2.19-1.49 3.16-1.18 3.16-1.18.63 1.58.23 2.75.11 3.04.74.8 1.19 1.83 1.19 3.08 0 4.4-2.71 5.38-5.29 5.67.42.36.79 1.06.79 2.14v3.17c0 .31.21.68.8.56A11.5 11.5 0 0 0 12 .7Z"/></svg>GitHub</a>
+          <a class="button secondary" href="#marketplace">Explore plugins</a>
+        </div>
+        <p class="release-note">macOS 15+ · Apple silicon · ad-hoc signed · <a href="/downloads/Cos-1.0.0-macOS-arm64.zip?v=1">download ZIP</a> · <a href="https://github.com/SSHDotCodes/Cos/releases/tag/v1.0.0">release notes</a></p>
+      </div>
+      <div class="hero-visual" aria-label="Cos model selector preview">
+        <div class="ambient ambient-one"></div><div class="ambient ambient-two"></div>
+        <div class="window-card"><div class="window-bar"><i></i><i></i><i></i><span>Cos</span></div><img src="/assets/cos-app-final.jpeg" alt="Cos native macOS interface showing its model and reasoning effort picker"></div>
+      </div>
+    </section>
+
+    <section class="trust-strip"><div class="shell provider-row"><span>Bring your subscription or key</span><b>ChatGPT</b><b>Claude</b><b>Grok</b><b>OpenCode Go</b><b>Qwen</b><b>Pi</b><b>OpenAI-compatible</b></div></section>
+
+    <section class="principles shell">
+      <article><span>01</span><h3>Native and lean</h3><p>SwiftUI, Keychain, direct provider streams, and one bounded Cos tool loop. No other coding harness runs behind the app.</p></article>
+      <article><span>02</span><h3>Context that lasts</h3><p>Compacted checkpoints preserve long tasks while goals survive every context rollover.</p></article>
+      <article><span>03</span><h3>Yours to shape</h3><p>Import Codex or Claude Code skills, add models, and manage capability-scoped plugins behind one calm interface.</p></article>
+    </section>
+
+    <section class="market shell" id="marketplace">
+      <div class="section-heading">
+        <div><p class="kicker">COS LIBRARY</p><h2>Small plugins.<br>Serious leverage.</h2></div>
+        <p>Install trusted capabilities and reusable skills without bloating the core app. Every listing declares what it can touch.</p>
+      </div>
+      <div class="market-toolbar">
+        <label class="search"><span>⌕</span><input id="plugin-search" type="search" placeholder="Search plugins and skills" autocomplete="off"></label>
+        <div class="filters" role="group" aria-label="Plugin filters"><button class="active" data-filter="all">All</button><button data-filter="plugin">Plugins</button><button data-filter="template">Templates</button></div>
+      </div>
+      <div id="plugin-grid" class="plugin-grid" aria-live="polite"><p class="loading">Loading the library…</p></div>
+    </section>
+
+    <section class="publish shell" id="publish">
+      <div><p class="kicker">BUILD WITH COS</p><h2>Make the agent<br>you wish existed.</h2></div>
+      <div class="publish-copy">
+        <p>A Cos plugin is a readable manifest plus optional skills and tools. Cos can create and manage its own guarded extensions, or you can publish one for everyone.</p>
+        <div class="code-line"><code>cos plugin validate ./my-plugin</code><button id="copy-command" aria-label="Copy starter command">Copy</button></div>
+        <button class="button primary" id="open-submit">Submit a plugin or skill</button>
+      </div>
+    </section>
+  </main>
+
+  <footer class="shell"><div class="brand"><img src="/assets/cos-icon.png?v=2" alt="cosine theta"></div><p>Built to make powerful agents feel calm.</p><div><a href="https://github.com/SSHDotCodes/Cos">GitHub</a><a href="/api/health">Status</a><a href="https://ssh.codes">ssh.codes</a></div></footer>
+
+  <dialog id="plugin-dialog">
+    <form id="plugin-form" method="dialog">
+      <div class="dialog-heading"><div><p class="kicker">PUBLISH</p><h2>Submit to Cos Library</h2></div><button class="icon-button" value="cancel" aria-label="Close">×</button></div>
+      <p class="dialog-intro">Submissions enter a short safety review before appearing publicly. Links must use HTTPS.</p>
+      <div class="form-grid">
+        <label>Type<select name="type"><option value="plugin">Plugin</option><option value="skill">Skill</option></select></label>
+        <label>Version<input name="version" required placeholder="0.1.0"></label>
+        <label class="wide">ID<input name="id" required placeholder="com.example.my-plugin"></label>
+        <label>Name<input name="name" required placeholder="My plugin"></label><label>Author<input name="author" required placeholder="Your name"></label>
+        <label class="wide">Description<textarea name="description" required minlength="24" placeholder="What does it add, and why is it useful?"></textarea></label>
+        <label class="wide">Manifest URL<input name="manifestURL" type="url" placeholder="https://github.com/you/plugin/cos.plugin.json"></label>
+        <label class="wide">Tags<input name="tags" placeholder="coding, git, productivity"></label>
+      </div>
+      <div id="form-status" class="form-status" role="status"></div>
+      <div class="dialog-actions"><button class="button secondary" value="cancel">Cancel</button><button class="button primary" type="submit" value="submit">Send for review</button></div>
+    </form>
+  </dialog>
+</body>
+</html>

@@ -1,0 +1,6 @@
+interface:
+  display_name: "Run on Server"
+  short_description: "Deploy services through rasppost or rtxpost"
+  default_prompt: "Use $run-on-server to deploy this service and verify it stays running."
+policy:
+  allow_implicit_invocation: true

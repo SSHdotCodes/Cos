@@ -1,0 +1,16 @@
+.DS_Store
+.build/
+outputs/
+work/
+web/node_modules/
+web/.next/
+web/.vinext/
+web/.wrangler/
+web/.data/
+web/public/downloads/
+.env
+.env.*
+*.pem
+*.p12
+*.mobileprovision
+*.xcuserstate

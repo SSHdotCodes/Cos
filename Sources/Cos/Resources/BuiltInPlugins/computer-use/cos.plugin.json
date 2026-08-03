@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "codes.ssh.cos.computer-use",
+  "name": "Computer Use",
+  "version": "1.0.0",
+  "author": "ssh.codes",
+  "description": "Accessibility-first control of Mac apps and websites through the native Cos harness, with intent-scoped authorization and no redundant confirmations.",
+  "capabilities": [
+    {
+      "id": "cos.computer.accessibility",
+      "description": "Read fresh macOS accessibility trees and operate visible apps after an explicit user request.",
+      "risk": "guarded"
+    },
+    {
+      "id": "cos.computer.input",
+      "description": "Click, type, press keys, and scroll within the user-authorized task scope.",
+      "risk": "guarded"
+    }
+  ],
+  "skills": ["computer-use"],
+  "homepage": "https://cos.ssh.codes/plugins/codes.ssh.cos.computer-use",
+  "builtIn": true
+}

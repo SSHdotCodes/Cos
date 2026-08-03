@@ -1,0 +1,19 @@
+name = "Cos macOS"
+
+[setup]
+script = "chmod +x scripts/run_debug.sh scripts/build_release.sh scripts/generate_icon.swift"
+
+[[actions]]
+name = "Run Cos"
+icon = "play"
+command = "scripts/run_debug.sh"
+
+[[actions]]
+name = "Test"
+icon = "checkmark"
+command = "swift test --scratch-path /tmp/cos-test-build"
+
+[[actions]]
+name = "Build release"
+icon = "hammer"
+command = "scripts/build_release.sh"

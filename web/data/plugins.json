@@ -1,0 +1,107 @@
+[
+  {
+    "id": "codes.ssh.cos.settings",
+    "name": "Cos Settings",
+    "version": "1.0.0",
+    "author": "ssh.codes",
+    "description": "The trusted built-in plugin that lets Cos manage allowlisted preferences, skills, and plugins when the user explicitly asks.",
+    "type": "plugin",
+    "featured": true,
+    "builtIn": true,
+    "tags": ["official", "settings", "productivity"],
+    "downloads": "Built in",
+    "manifest": {
+      "schemaVersion": 1,
+      "id": "codes.ssh.cos.settings",
+      "name": "Cos Settings",
+      "version": "1.0.0",
+      "author": "ssh.codes",
+      "description": "The trusted built-in plugin that lets Cos manage allowlisted preferences, skills, and plugins when the user explicitly asks.",
+      "capabilities": [
+        {"id": "cos.settings.update", "description": "Change Fast Mode, access mode, automatic compaction, token display, or reasoning effort.", "risk": "safe"},
+        {"id": "cos.skills.manage", "description": "Create and manage Cos-owned skills.", "risk": "guarded"},
+        {"id": "cos.plugins.manage", "description": "Create, enable, disable, or remove non-built-in plugins.", "risk": "guarded"}
+      ],
+      "skills": ["settings-control", "skill-management", "plugin-management"],
+      "homepage": "https://cos.ssh.codes/plugins/codes.ssh.cos.settings",
+      "builtIn": true
+    }
+  },
+  {
+    "id": "codes.ssh.cos.computer-use",
+    "name": "Computer Use",
+    "version": "1.0.0",
+    "author": "ssh.codes",
+    "description": "Accessibility-first control of Mac apps and websites through the native Cos harness. Explicit user intent covers the complete ordinary flow, so Cos does not pause for redundant confirmations.",
+    "type": "plugin",
+    "featured": true,
+    "builtIn": true,
+    "tags": ["official", "computer-use", "browser", "automation"],
+    "downloads": "Built in",
+    "manifest": {
+      "schemaVersion": 1,
+      "id": "codes.ssh.cos.computer-use",
+      "name": "Computer Use",
+      "version": "1.0.0",
+      "author": "ssh.codes",
+      "description": "Accessibility-first control of Mac apps and websites through the native Cos harness, with intent-scoped authorization and no redundant confirmations.",
+      "capabilities": [
+        {"id": "cos.computer.accessibility", "description": "Read fresh macOS accessibility trees and operate visible apps after an explicit user request.", "risk": "guarded"},
+        {"id": "cos.computer.input", "description": "Click, type, press keys, and scroll within the user-authorized task scope.", "risk": "guarded"}
+      ],
+      "skills": ["computer-use"],
+      "homepage": "https://cos.ssh.codes/plugins/codes.ssh.cos.computer-use",
+      "builtIn": true
+    }
+  },
+  {
+    "id": "codes.ssh.cos.run-on-server",
+    "name": "Run on Server",
+    "version": "1.0.0",
+    "author": "ssh.codes",
+    "description": "Deploy and keep services running through configured rasppost or rtxpost targets, including fresh-source synchronization and production verification.",
+    "type": "plugin",
+    "featured": true,
+    "builtIn": true,
+    "tags": ["official", "deployment", "server", "ssh-codes"],
+    "downloads": "Built in",
+    "manifest": {
+      "schemaVersion": 1,
+      "id": "codes.ssh.cos.run-on-server",
+      "name": "Run on Server",
+      "version": "1.0.0",
+      "author": "ssh.codes",
+      "description": "Deploy and keep services running through configured rasppost or rtxpost servers, with fresh-source synchronization and production verification.",
+      "capabilities": [
+        {"id": "cos.server.deploy", "description": "Deploy a complete service tree with rasppost or rtxpost when the user explicitly requests server deployment.", "risk": "guarded"},
+        {"id": "cos.server.verify", "description": "Check service status, logs, autostart, restart policy, and public health endpoints.", "risk": "safe"}
+      ],
+      "skills": ["run-on-server"],
+      "homepage": "https://cos.ssh.codes/plugins/codes.ssh.cos.run-on-server",
+      "builtIn": true
+    }
+  },
+  {
+    "id": "codes.ssh.cos.starter",
+    "name": "Plugin Starter",
+    "version": "1.0.0",
+    "author": "ssh.codes",
+    "description": "A minimal manifest template for publishing a capability-scoped Cos plugin or skill bundle.",
+    "type": "template",
+    "featured": false,
+    "builtIn": false,
+    "tags": ["official", "template", "developer"],
+    "downloads": "Template",
+    "manifest": {
+      "schemaVersion": 1,
+      "id": "com.example.my-plugin",
+      "name": "My Cos Plugin",
+      "version": "0.1.0",
+      "author": "Your name",
+      "description": "Describe what this plugin adds to Cos.",
+      "capabilities": [],
+      "skills": [],
+      "homepage": "https://example.com"
+    }
+  }
+]

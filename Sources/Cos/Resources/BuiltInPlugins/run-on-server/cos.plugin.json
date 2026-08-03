@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "codes.ssh.cos.run-on-server",
+  "name": "Run on Server",
+  "version": "1.0.0",
+  "author": "ssh.codes",
+  "description": "Deploy and keep services running through configured rasppost or rtxpost servers, with fresh-source synchronization and production verification.",
+  "capabilities": [
+    {
+      "id": "cos.server.deploy",
+      "description": "Deploy a complete service tree with rasppost or rtxpost when the user explicitly requests server deployment.",
+      "risk": "guarded"
+    },
+    {
+      "id": "cos.server.verify",
+      "description": "Check service status, logs, autostart, restart policy, and public health endpoints.",
+      "risk": "safe"
+    }
+  ],
+  "skills": ["run-on-server"],
+  "homepage": "https://cos.ssh.codes/plugins/codes.ssh.cos.run-on-server",
+  "builtIn": true
+}

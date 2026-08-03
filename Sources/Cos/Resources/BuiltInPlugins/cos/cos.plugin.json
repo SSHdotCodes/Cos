@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "codes.ssh.cos.settings",
+  "name": "Cos",
+  "version": "1.0.0",
+  "author": "ssh.codes",
+  "description": "The trusted built-in plugin that lets Cos manage an allowlist of its own preferences, skills, and plugins when the user explicitly asks.",
+  "capabilities": [
+    {
+      "id": "cos.settings.update",
+      "description": "Change Fast Mode, access mode, automatic compaction, token display, or reasoning effort.",
+      "risk": "safe"
+    },
+    {
+      "id": "cos.skills.manage",
+      "description": "Create, add, update, or remove skills inside Cos-managed storage.",
+      "risk": "guarded"
+    },
+    {
+      "id": "cos.plugins.manage",
+      "description": "Create, enable, disable, or remove non-built-in Cos plugins.",
+      "risk": "guarded"
+    }
+  ],
+  "skills": ["settings-control", "skill-management", "plugin-management"],
+  "homepage": "https://cos.ssh.codes/plugins/codes.ssh.cos.settings",
+  "builtIn": true
+}
