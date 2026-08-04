@@ -2,7 +2,7 @@
   "version": "1.0.1",
   "build": 103,
   "downloadURL": "https://cos.ssh.codes/downloads/Cos-1.0.1-macOS-arm64.zip?v=1",
-  "sha256": "ff847fa1646e4cca88fc66795cacceed80214fd8441f04a058c005365948f51d",
+  "sha256": "5b4baef79494c9ebbfacd0df2932d272aac90da6f896b5d9f4c265f16213815f",
   "minimumSystemVersion": "15.0",
   "releaseNotes": "Cos 1.0.1 adds a native interactive BetterWright browser, steering, model-selectable subagents, provider marks, GPT-5.6 Luna's full effort range, and a smoother reasoning control."
 }
