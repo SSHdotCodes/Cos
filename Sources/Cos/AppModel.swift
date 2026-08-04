@@ -88,6 +88,10 @@ final class AppModel: ObservableObject {
     private let secureStore = SecureStore()
     private let updateService = CosUpdateService()
     private var runningTask: Task<Void, Never>?
+    private var activeRunID: UUID?
+    private var activeRunThreadID: UUID?
+    private var activeRunAssistantID: UUID?
+    private var activeRunControl: AgentRunControl?
     private var titleTasks: [UUID: Task<Void, Never>] = [:]
     private var updateCheckTask: Task<Void, Never>?
     private var lastUpdateCheck: Date?
@@ -125,6 +129,14 @@ final class AppModel: ObservableObject {
 
     var selectedProvider: ProviderProfile {
         providers.first { $0.id == selectedModel.providerID } ?? providers[0]
+    }
+
+    var canSteerSelectedThread: Bool {
+        isRunning && selectedThreadID == activeRunThreadID
+    }
+
+    var subagentRoutes: [SubagentRoute] {
+        runtime.accessibleSubagentRoutes(providers: providers, models: models)
     }
 
     var titleModels: [ModelProfile] {
@@ -314,6 +326,22 @@ final class AppModel: ObservableObject {
         startRun(rawPrompt, appendUserMessage: true)
     }
 
+    func steer(_ rawPrompt: String) {
+        let prompt = rawPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty,
+              isRunning,
+              let activeRunThreadID,
+              selectedThreadID == activeRunThreadID,
+              let control = activeRunControl else { return }
+        activity = "Applying steering…"
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            if !(await control.submit(prompt)), activeRunThreadID == self.activeRunThreadID {
+                activity = "Steering queue is full"
+            }
+        }
+    }
+
     private func startRun(_ rawPrompt: String, appendUserMessage: Bool) {
         let prompt = rawPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty, !isRunning, let index = selectedThreadBindingIndex else { return }
@@ -332,9 +360,15 @@ final class AppModel: ObservableObject {
             }
         }
         let assistantID = UUID()
+        let runID = UUID()
+        let runControl = AgentRunControl()
         threads[index].messages.append(.init(id: assistantID, role: .assistant, content: "", isStreaming: true))
         threads[index].updatedAt = Date()
         isRunning = true
+        activeRunID = runID
+        activeRunThreadID = threads[index].id
+        activeRunAssistantID = assistantID
+        activeRunControl = runControl
         activity = "Preparing context…"
         lastError = nil
 
@@ -359,6 +393,8 @@ final class AppModel: ObservableObject {
             return visible
         }
         let referenceContext = ComposerReferenceResolver.referenceContext(in: prompt, plugins: referencePlugins)
+        let subagentsAuthorized = SubagentAuthorization.isExplicitlyRequested(in: prompt)
+        let availableSubagentRoutes = subagentRoutes
         let computerUseEnabled = plugins.contains { $0.id == "codes.ssh.cos.computer-use" && $0.isEnabled }
         if computerUseEnabled, !computerUseAccessGranted, Self.looksLikeComputerUseRequest(prompt) {
             requestComputerUseAccess()
@@ -384,21 +420,35 @@ final class AppModel: ObservableObject {
             fullAccess: preferences.fullAccess,
             workspaceIsTrusted: isWorkspaceTrusted(threads[index].workspacePath),
             extensionInstructions: activeExtensionInstructions(),
-            computerUseEnabled: computerUseEnabled
+            computerUseEnabled: computerUseEnabled,
+            availableSubagentRoutes: availableSubagentRoutes,
+            subagentsAuthorized: subagentsAuthorized,
+            runControl: runControl
         )
         persist(threads[index])
 
         runningTask = Task { [weak self] in
             guard let self else { return }
+            var currentAssistantID = assistantID
             do {
                 let stream = try runtime.stream(request: request)
                 for try await event in stream {
-                    if Task.isCancelled { break }
-                    handle(event, assistantID: assistantID, threadID: request.thread.id)
+                    guard !Task.isCancelled, activeRunID == runID else { return }
+                    if case .steeringApplied(let messages) = event {
+                        currentAssistantID = applySteering(
+                            messages,
+                            assistantID: currentAssistantID,
+                            threadID: request.thread.id
+                        )
+                    } else {
+                        handle(event, assistantID: currentAssistantID, threadID: request.thread.id)
+                    }
                 }
-                finishAssistant(id: assistantID, threadID: request.thread.id)
+                guard activeRunID == runID else { return }
+                finishAssistant(id: currentAssistantID, threadID: request.thread.id)
             } catch {
-                failAssistant(id: assistantID, threadID: request.thread.id, retryPrompt: prompt, error: error)
+                guard activeRunID == runID else { return }
+                failAssistant(id: currentAssistantID, threadID: request.thread.id, retryPrompt: prompt, error: error)
             }
         }
     }
@@ -426,12 +476,20 @@ final class AppModel: ObservableObject {
     }
 
     func cancel() {
+        let runningThreadID = activeRunThreadID
+        let runningAssistantID = activeRunAssistantID
+        activeRunID = nil
+        activeRunThreadID = nil
+        activeRunAssistantID = nil
+        activeRunControl = nil
         runningTask?.cancel()
         runningTask = nil
         isRunning = false
         activity = "Stopped"
-        guard let threadIndex = selectedThreadBindingIndex,
-              let messageIndex = threads[threadIndex].messages.lastIndex(where: { $0.isStreaming }) else { return }
+        guard let runningThreadID,
+              let threadIndex = threads.firstIndex(where: { $0.id == runningThreadID }),
+              let runningAssistantID,
+              let messageIndex = threads[threadIndex].messages.firstIndex(where: { $0.id == runningAssistantID }) else { return }
         threads[threadIndex].messages[messageIndex].isStreaming = false
         persist(threads[threadIndex])
     }
@@ -496,6 +554,11 @@ final class AppModel: ObservableObject {
         case .tool(let name, let detail):
             activity = detail.isEmpty ? "Using \(name)…" : "\(name): \(detail)"
             appendWork(.init(kind: .tool, title: name.replacingOccurrences(of: "_", with: " ").capitalized, detail: detail), assistantID: assistantID, threadIndex: threadIndex, coalesce: false)
+        case .subagent(let name, let detail):
+            activity = "\(name): \(detail)"
+            upsertSubagentWork(name: name, detail: detail, assistantID: assistantID, threadIndex: threadIndex)
+        case .steeringApplied:
+            break
         case .usage(let input, let output):
             if var goal = threads[threadIndex].goal {
                 goal.usedTokens += input + output
@@ -527,6 +590,52 @@ final class AppModel: ObservableObject {
         threads[threadIndex].messages[messageIndex].workItems = items
     }
 
+    private func upsertSubagentWork(name: String, detail: String, assistantID: UUID, threadIndex: Int) {
+        guard let messageIndex = threads[threadIndex].messages.firstIndex(where: { $0.id == assistantID }) else { return }
+        var items = threads[threadIndex].messages[messageIndex].workItems ?? []
+        if let last = items.indices.last, items[last].kind == .subagent, items[last].title == name {
+            items[last].detail = detail
+        } else if items.count < 120 {
+            items.append(.init(kind: .subagent, title: name, detail: detail))
+        }
+        threads[threadIndex].messages[messageIndex].workItems = items
+    }
+
+    private func applySteering(
+        _ messages: [SteeringMessage],
+        assistantID: UUID,
+        threadID: UUID
+    ) -> UUID {
+        guard !messages.isEmpty,
+              let threadIndex = threads.firstIndex(where: { $0.id == threadID }),
+              let messageIndex = threads[threadIndex].messages.firstIndex(where: { $0.id == assistantID }) else {
+            return assistantID
+        }
+        let detail = messages.map(\.content).joined(separator: "\n")
+        threads[threadIndex].messages[messageIndex].isStreaming = false
+        appendWork(
+            .init(kind: .status, title: "Steered", detail: detail),
+            assistantID: assistantID,
+            threadIndex: threadIndex,
+            coalesce: false
+        )
+        for message in messages {
+            threads[threadIndex].messages.append(.init(role: .user, content: message.content))
+        }
+        let nextAssistantID = UUID()
+        threads[threadIndex].messages.append(.init(
+            id: nextAssistantID,
+            role: .assistant,
+            content: "",
+            isStreaming: true
+        ))
+        threads[threadIndex].updatedAt = Date()
+        activeRunAssistantID = nextAssistantID
+        activity = "Steering applied"
+        persist(threads[threadIndex])
+        return nextAssistantID
+    }
+
     private func finishAssistant(id: UUID, threadID: UUID) {
         guard let threadIndex = threads.firstIndex(where: { $0.id == threadID }),
               let messageIndex = threads[threadIndex].messages.firstIndex(where: { $0.id == id }) else { return }
@@ -536,6 +645,10 @@ final class AppModel: ObservableObject {
         if let mutation = extracted.mutation { apply(mutation) }
         if let action = extracted.managementAction { apply(action) }
         threads[threadIndex].updatedAt = Date()
+        activeRunID = nil
+        activeRunThreadID = nil
+        activeRunAssistantID = nil
+        activeRunControl = nil
         isRunning = false
         runningTask = nil
         activity = "Ready"
@@ -549,6 +662,10 @@ final class AppModel: ObservableObject {
            case .directoryTrustRequired(let workspacePath) = runtimeError {
             threads[threadIndex].messages.remove(at: messageIndex)
             threads[threadIndex].updatedAt = Date()
+            activeRunID = nil
+            activeRunThreadID = nil
+            activeRunAssistantID = nil
+            activeRunControl = nil
             isRunning = false
             runningTask = nil
             activity = "Waiting for directory trust"
@@ -561,6 +678,10 @@ final class AppModel: ObservableObject {
             threads[threadIndex].messages[messageIndex].content = "I couldn’t start this run. \(error.localizedDescription)"
         }
         threads[threadIndex].messages[messageIndex].isStreaming = false
+        activeRunID = nil
+        activeRunThreadID = nil
+        activeRunAssistantID = nil
+        activeRunControl = nil
         isRunning = false
         runningTask = nil
         activity = "Needs attention"

@@ -62,8 +62,88 @@ public struct AgentRuntime: Sendable {
             throw AgentRuntimeError.directoryTrustRequired(request.thread.workspacePath)
         }
 
+        let (routedRequest, credential) = try routedRequestAndCredential(for: request)
+        return harness.stream(
+            request: routedRequest,
+            credential: credential,
+            subagentRunner: { subagentRequest in
+                try subagentStream(parent: routedRequest, request: subagentRequest)
+            }
+        )
+    }
+
+    public func accessibleSubagentRoutes(
+        providers: [ProviderProfile],
+        models: [ModelProfile]
+    ) -> [SubagentRoute] {
+        let providerPairs: [(String, ProviderProfile)] = providers.compactMap { provider in
+            guard provider.isEnabled,
+                  provider.bridge != .pi,
+                  (try? credential(for: provider)) != nil else { return nil }
+            return (provider.id, provider)
+        }
+        let usableProviders = Dictionary(uniqueKeysWithValues: providerPairs)
+        return models.compactMap { model in
+            guard model.supportsTools, let provider = usableProviders[model.providerID] else { return nil }
+            return SubagentRoute(model: model, provider: provider)
+        }
+    }
+
+    public func sessionInfo(for provider: ProviderProfile) -> ProviderSessionInfo? {
+        guard provider.authMode == .subscription,
+              let credential = try? credentials.subscriptionCredential(for: provider) else { return nil }
+        return ProviderSessionInfo(email: credential.email, accountID: credential.accountID)
+    }
+
+    private func subagentStream(
+        parent: AgentRequest,
+        request: CosSubagentRequest
+    ) throws -> AsyncThrowingStream<AgentEvent, Error> {
+        guard parent.subagentsAuthorized, parent.agentDepth == 0 else {
+            throw AgentRuntimeError.launchFailed("subagents were not authorized by the user for this run")
+        }
+        guard let route = parent.availableSubagentRoutes.first(where: { $0.id == request.modelID }) else {
+            throw AgentRuntimeError.launchFailed("\(request.modelID) is not in this run's accessible subagent model allowlist")
+        }
+        guard route.accepts(request.effort) else {
+            let valid = route.model.effortOptions.map(\.title).joined(separator: ", ")
+            throw AgentRuntimeError.launchFailed("\(route.model.name) does not support \(request.effort.title) reasoning. Available efforts: \(valid)")
+        }
+
+        let childThread = CosThread(
+            workspacePath: parent.thread.workspacePath,
+            modelID: route.model.id,
+            effort: request.effort,
+            messages: [.init(role: .user, content: request.task)]
+        )
+        let childRequest = AgentRequest(
+            prompt: """
+            You are a focused Cos subagent. Complete this bounded delegated task and return a concise, evidence-based result to the parent agent.
+
+            Delegated task:
+            \(request.task)
+            """,
+            latestUserRequest: request.task,
+            thread: childThread,
+            model: route.model,
+            provider: route.provider,
+            effort: request.effort,
+            fastMode: parent.fastMode && route.model.supportsFastMode,
+            fullAccess: parent.fullAccess,
+            workspaceIsTrusted: parent.workspaceIsTrusted,
+            extensionInstructions: parent.extensionInstructions,
+            toolsEnabled: true,
+            computerUseEnabled: false,
+            availableSubagentRoutes: [],
+            subagentsAuthorized: false,
+            agentDepth: parent.agentDepth + 1
+        )
+        let (routedRequest, credential) = try routedRequestAndCredential(for: childRequest)
+        return harness.stream(request: routedRequest, credential: credential, subagentRunner: nil)
+    }
+
+    private func routedRequestAndCredential(for request: AgentRequest) throws -> (AgentRequest, AgentCredential) {
         var routedRequest = request
-        let credential: AgentCredential?
         if request.provider.bridge == .pi {
             guard let chatGPT = DefaultCatalog.providers.first(where: { $0.id == "chatgpt" }),
                   let model = DefaultCatalog.models.first(where: { $0.providerID == "chatgpt" }) else {
@@ -71,24 +151,26 @@ public struct AgentRuntime: Sendable {
             }
             routedRequest.provider = chatGPT
             routedRequest.model = model
-            credential = try credentials.subscriptionCredential(for: chatGPT)
-        } else if let account = request.provider.keychainAccount,
-                  let token = try secureStore.get(account: account) {
-            credential = AgentCredential(token: token)
-        } else if request.provider.authMode == .subscription {
-            credential = try credentials.subscriptionCredential(for: request.provider)
-        } else {
-            credential = nil
+            guard let credential = try credential(for: chatGPT) else {
+                throw AgentRuntimeError.missingAPIKey(chatGPT.name)
+            }
+            return (routedRequest, credential)
         }
-
-        guard let credential else { throw AgentRuntimeError.missingAPIKey(request.provider.name) }
-        return harness.stream(request: routedRequest, credential: credential)
+        guard let credential = try credential(for: request.provider) else {
+            throw AgentRuntimeError.missingAPIKey(request.provider.name)
+        }
+        return (routedRequest, credential)
     }
 
-    public func sessionInfo(for provider: ProviderProfile) -> ProviderSessionInfo? {
-        guard provider.authMode == .subscription,
-              let credential = try? credentials.subscriptionCredential(for: provider) else { return nil }
-        return ProviderSessionInfo(email: credential.email, accountID: credential.accountID)
+    private func credential(for provider: ProviderProfile) throws -> AgentCredential? {
+        if let account = provider.keychainAccount,
+           let token = try secureStore.get(account: account) {
+            return AgentCredential(token: token)
+        }
+        if provider.authMode == .subscription {
+            return try credentials.subscriptionCredential(for: provider)
+        }
+        return nil
     }
 }
 

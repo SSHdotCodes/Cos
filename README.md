@@ -31,6 +31,8 @@ Cos keeps the entire agent loop in one lightweight Swift runtime: provider strea
 - **Native and lean.** SwiftUI, direct provider transports, macOS Keychain, bounded work traces, and no Electron runtime.
 - **One harness for every model.** ChatGPT, Anthropic, xAI, Qwen, OpenCode Go, Pi, and custom OpenAI-compatible endpoints use the same Cos tool loop.
 - **Long-running tasks that stay coherent.** Persistent `/goal` state and compacted checkpoints preserve intent while controlling context growth.
+- **Steer without starting over.** Type new direction while a run is active and Cos immediately continues from the updated conversation.
+- **Native subagents.** Explicitly delegate bounded work to any connected model at one of that model’s supported reasoning efforts; every child still runs through the Cos harness.
 - **Model-aware controls.** Each model exposes only the reasoning levels and Fast Mode capability it supports.
 - **A real extension system.** Import portable Codex and Claude Code skills, install from the in-app marketplace, or create capability-scoped Cos plugins.
 - **Computer Use built in.** Accessibility-first Mac control follows explicit user intent without redundant stops while retaining safety boundaries for consequential actions.
@@ -65,6 +67,12 @@ The 1.0 community build is ad-hoc signed, not Apple-notarized. On first launch, 
 ```
 
 Goals persist with the task and remain part of compacted agent context.
+
+## Steering and subagents
+
+While Cos is working, type a correction or added instruction and press Command–Return (or the send arrow) to steer the active task. The interrupted work remains in the expandable trace and the replacement run uses the full updated conversation.
+
+Use `/subagent` or choose **+ → Ask a subagent** to prefill an exact model and reasoning effort. Cos only offers locally connected providers, validates the model-specific effort allowlist, runs one child at a time, and returns child tools and status inside the parent work trace.
 
 ## Providers and credentials
 

@@ -48,7 +48,7 @@ struct ComposerView: View {
 
             ZStack(alignment: .topLeading) {
                 if text.isEmpty {
-                    Text("Ask Cos to build, inspect, fix, or run anything…")
+                    Text(composerPlaceholder)
                         .font(.system(size: 13))
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, 14)
@@ -73,6 +73,21 @@ struct ComposerView: View {
                 Menu {
                     Button("Choose workspace…", systemImage: "folder") { model.chooseWorkspace() }
                     Button("New task", systemImage: "plus.bubble") { model.newThread() }
+                    Menu("Ask a subagent", systemImage: "person.2") {
+                        if model.subagentRoutes.isEmpty {
+                            Text("Connect a model provider in Settings")
+                        } else {
+                            ForEach(model.subagentRoutes) { route in
+                                Menu(route.model.name) {
+                                    ForEach(route.model.effortOptions) { effort in
+                                        Button(effort.title) {
+                                            prepareSubagentPrompt(route: route, effort: effort)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     Divider()
                     Button("Plugin library…", systemImage: "shippingbox") { model.isPluginLibraryPresented = true }
                 } label: {
@@ -135,15 +150,16 @@ struct ComposerView: View {
                 .buttonStyle(.plain)
                 .help("Use macOS Dictation")
 
-                Button { model.isRunning ? model.cancel() : submit() } label: {
-                    Image(systemName: model.isRunning ? "stop.fill" : "arrow.up")
+                Button { primaryAction() } label: {
+                    Image(systemName: showsStopAction ? "stop.fill" : "arrow.up")
                         .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(model.isRunning || !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? Color(nsColor: .windowBackgroundColor) : .secondary)
+                        .foregroundStyle(model.isRunning || !trimmedText.isEmpty ? Color(nsColor: .windowBackgroundColor) : .secondary)
                         .frame(width: 29, height: 29)
-                        .background(model.isRunning || !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? AnyShapeStyle(.primary) : AnyShapeStyle(.primary.opacity(0.11)), in: Circle())
+                        .background(model.isRunning || !trimmedText.isEmpty ? AnyShapeStyle(.primary) : AnyShapeStyle(.primary.opacity(0.11)), in: Circle())
                 }
                 .buttonStyle(.plain)
                 .keyboardShortcut(.return, modifiers: .command)
+                .help(showsStopAction ? "Stop active run" : model.isRunning ? "Steer active run" : "Send")
             }
             .padding(.horizontal, 8)
             .padding(.bottom, 7)
@@ -228,13 +244,47 @@ struct ComposerView: View {
         return min(132, max(46, CGFloat(explicitLines + wrappedLines) * 18 + 28))
     }
 
+    private var trimmedText: String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var composerPlaceholder: String {
+        if model.canSteerSelectedThread { return "Steer the active run…" }
+        if model.isRunning { return "Another task is running…" }
+        return "Ask Cos to build, inspect, fix, or run anything…"
+    }
+
+    private var showsStopAction: Bool {
+        model.isRunning && (trimmedText.isEmpty || !model.canSteerSelectedThread)
+    }
+
+    private func primaryAction() {
+        if showsStopAction {
+            model.cancel()
+        } else {
+            submit()
+        }
+    }
+
     private func submit() {
-        let prompt = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !prompt.isEmpty, !model.isRunning else { return }
+        let prompt = trimmedText
+        guard !prompt.isEmpty else { return }
+        if model.isRunning {
+            guard model.canSteerSelectedThread else { return }
+            model.steer(prompt)
+        } else {
+            model.send(prompt)
+        }
         text = ""
         selectionUTF16Offset = 0
         dismissedSuggestionSignature = nil
-        model.send(prompt)
+    }
+
+    private func prepareSubagentPrompt(route: SubagentRoute, effort: ReasoningEffort) {
+        text = "/subagent Ask \(route.model.name) [\(route.model.id)] at \(effort.rawValue) reasoning to "
+        selectionUTF16Offset = text.utf16.count
+        dismissedSuggestionSignature = nil
+        editorFocused = true
     }
 
     private func moveSuggestion(_ offset: Int) {

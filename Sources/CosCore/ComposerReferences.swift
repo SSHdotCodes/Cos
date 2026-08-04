@@ -49,6 +49,7 @@ public struct ComposerReferenceSuggestion: Identifiable, Hashable, Sendable {
 
 public enum ComposerReferenceResolver {
     private static let commands: [ComposerReferenceSuggestion] = [
+        .init(id: "command:subagent", kind: .command, title: "/subagent", detail: "Delegate a bounded task to another model and effort", insertion: "/subagent "),
         .init(id: "command:goal", kind: .command, title: "/goal", detail: "Set a goal or show the active goal", insertion: "/goal "),
         .init(id: "command:goal-budget", kind: .command, title: "/goal --budget", detail: "Set a goal with a token budget", insertion: "/goal --budget "),
         .init(id: "command:goal-status", kind: .command, title: "/goal status", detail: "Show goal progress and token usage", insertion: "/goal status"),

@@ -14,11 +14,16 @@ Composer
   → CosHarness runs one bounded provider-neutral tool loop
       → ChatGPT Responses / Anthropic Messages / OpenAI-compatible SSE
       → workspace file, search, patch, Full Access command, and native macOS accessibility tools
+      → explicitly authorized, allowlisted Cos subagents with independently resolved model credentials and effort
   → AgentEvent stream updates the answer and structured work trace
   → ThreadStore atomically persists the finished snapshot
 ```
 
 The harness permits at most 24 tool steps, bounds response and tool-result buffers, truncates its in-run transcript, and streams provider bytes instead of retaining full network responses. Login CLIs can bootstrap subscription credentials, but no external agent CLI runs the task.
+
+Steering is generation-tagged in `AppModel`: an active provider stream is canceled, its partial work segment is closed and retained, the steering message is appended, and a replacement run begins from the updated conversation. Completion and failure handlers must match the active generation, thread, and assistant IDs, so an interrupted run cannot clear or overwrite its successor.
+
+Subagents use the same `CosHarness`, workspace trust, Full Access boundary, extensions, and native tools as the parent. The runtime builds an allowlist from enabled models whose providers have a resolvable local credential. Model output can select only a stable allowlisted model ID and an effort that model declares. Child runs cannot create grandchildren, Computer Use is not inherited, execution is sequential, and the parent caps delegation at six calls.
 
 Enabled plugin skill files are injected into a bounded extension context. The model can call one native Cos tool at a time; meaningful statuses, reasoning summaries, and every tool invocation become work-trace events that auto-collapse after completion. Redundant harness-start bookkeeping is not shown.
 

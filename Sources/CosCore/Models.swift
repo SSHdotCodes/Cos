@@ -138,6 +138,54 @@ public struct ModelProfile: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
+public struct SubagentRoute: Identifiable, Hashable, Sendable {
+    public var model: ModelProfile
+    public var provider: ProviderProfile
+
+    public init(model: ModelProfile, provider: ProviderProfile) {
+        self.model = model
+        self.provider = provider
+    }
+
+    public var id: String { model.id }
+
+    public func accepts(_ effort: ReasoningEffort) -> Bool {
+        model.effortOptions.contains(effort)
+    }
+}
+
+public struct CosSubagentRequest: Hashable, Sendable {
+    public var task: String
+    public var modelID: String
+    public var effort: ReasoningEffort
+
+    public init(task: String, modelID: String, effort: ReasoningEffort) {
+        self.task = task
+        self.modelID = modelID
+        self.effort = effort
+    }
+}
+
+public typealias CosSubagentRunner = @Sendable (CosSubagentRequest) throws -> AsyncThrowingStream<AgentEvent, Error>
+
+public enum SubagentAuthorization {
+    public static func isExplicitlyRequested(in prompt: String) -> Bool {
+        let value = prompt.lowercased()
+        guard !isExplicitlyForbidden(in: value) else { return false }
+        return value.contains("/subagent")
+            || value.contains("subagent")
+            || value.contains("sub-agent")
+            || value.contains("delegate to another model")
+            || value.contains("delegate this to")
+    }
+
+    public static func isExplicitlyForbidden(in prompt: String) -> Bool {
+        let value = prompt.lowercased()
+        return ["do not use subagent", "don't use subagent", "no subagent", "without subagent"]
+            .contains(where: value.contains)
+    }
+}
+
 public enum MessageRole: String, Codable, Sendable {
     case system
     case user
@@ -149,6 +197,7 @@ public enum WorkTraceKind: String, Codable, Sendable {
     case status
     case reasoning
     case tool
+    case subagent
 }
 
 public struct WorkTraceItem: Codable, Identifiable, Hashable, Sendable {
@@ -272,6 +321,10 @@ public struct AgentRequest: Sendable {
     public var extensionInstructions: String
     public var toolsEnabled: Bool
     public var computerUseEnabled: Bool
+    public var availableSubagentRoutes: [SubagentRoute]
+    public var subagentsAuthorized: Bool
+    public var agentDepth: Int
+    public var runControl: AgentRunControl?
 
     public init(
         prompt: String,
@@ -285,7 +338,11 @@ public struct AgentRequest: Sendable {
         workspaceIsTrusted: Bool = false,
         extensionInstructions: String = "",
         toolsEnabled: Bool = true,
-        computerUseEnabled: Bool = false
+        computerUseEnabled: Bool = false,
+        availableSubagentRoutes: [SubagentRoute] = [],
+        subagentsAuthorized: Bool = false,
+        agentDepth: Int = 0,
+        runControl: AgentRunControl? = nil
     ) {
         self.prompt = prompt
         self.latestUserRequest = latestUserRequest ?? prompt
@@ -299,6 +356,10 @@ public struct AgentRequest: Sendable {
         self.extensionInstructions = extensionInstructions
         self.toolsEnabled = toolsEnabled
         self.computerUseEnabled = computerUseEnabled
+        self.availableSubagentRoutes = availableSubagentRoutes
+        self.subagentsAuthorized = subagentsAuthorized
+        self.agentDepth = agentDepth
+        self.runControl = runControl
     }
 }
 
@@ -307,6 +368,8 @@ public enum AgentEvent: Sendable, Equatable {
     case workDelta(String)
     case textDelta(String)
     case tool(name: String, detail: String)
+    case subagent(name: String, detail: String)
+    case steeringApplied([SteeringMessage])
     case usage(input: Int, output: Int)
     case completed
 }

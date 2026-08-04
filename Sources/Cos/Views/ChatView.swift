@@ -259,6 +259,7 @@ private struct WorkTraceView: View {
         case .status: "waveform.path.ecg"
         case .reasoning: "text.bubble"
         case .tool: "wrench.and.screwdriver"
+        case .subagent: "person.2"
         }
     }
 
@@ -267,6 +268,7 @@ private struct WorkTraceView: View {
         case .status: CosTheme.blue
         case .reasoning: .secondary
         case .tool: CosTheme.orange
+        case .subagent: Color.indigo
         }
     }
 }
