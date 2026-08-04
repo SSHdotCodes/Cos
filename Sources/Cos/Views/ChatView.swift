@@ -57,6 +57,25 @@ struct ChatView: View {
             }
             .buttonStyle(.plain)
             .help("Choose workspace")
+
+            if model.isBetterWrightEnabled {
+                Button {
+                    withAnimation(.easeOut(duration: 0.16)) {
+                        model.isBrowserPanelPresented.toggle()
+                    }
+                } label: {
+                    Image(systemName: "sidebar.right")
+                        .font(.system(size: 12, weight: .medium))
+                        .frame(width: 28, height: 28)
+                        .background(
+                            model.isBrowserPanelPresented ? Color.primary.opacity(0.10) : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        )
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut("b", modifiers: [.command, .shift])
+                .help(model.isBrowserPanelPresented ? "Close Browser" : "Open Browser")
+            }
         }
         .padding(.horizontal, 16)
         .frame(height: 52)

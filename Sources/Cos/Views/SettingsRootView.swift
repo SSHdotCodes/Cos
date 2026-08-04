@@ -215,10 +215,13 @@ private struct ModelSettingsView: View {
             SettingsGroup("Available models") {
                 ForEach(model.models) { item in
                     SettingsRow(item.name, detail: "\(item.model) · \((item.contextWindow / 1_000).formatted())K context") {
-                        if model.preferences.selectedModelID == item.id {
-                            Text("Default").font(.caption).foregroundStyle(CosTheme.blue)
-                        } else {
-                            Button("Make default") { model.preferences.selectedModelID = item.id; model.persistPreferences() }
+                        HStack(spacing: 8) {
+                            if model.preferences.selectedModelID == item.id {
+                                Text("Default").font(.caption).foregroundStyle(CosTheme.blue)
+                            } else {
+                                Button("Make default") { model.preferences.selectedModelID = item.id; model.persistPreferences() }
+                            }
+                            ProviderMark(providerID: item.providerID, size: 15)
                         }
                     }
                 }

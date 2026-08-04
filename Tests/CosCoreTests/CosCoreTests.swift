@@ -109,7 +109,7 @@ final class CosCoreTests: XCTestCase {
         XCTAssertTrue(sol.supportsFastMode)
 
         let luna = try XCTUnwrap(DefaultCatalog.models.first { $0.id == "chatgpt:gpt-5.6-luna" })
-        XCTAssertEqual(luna.effortOptions, [.low])
+        XCTAssertEqual(luna.effortOptions, ReasoningEffort.allCases)
         let haiku = try XCTUnwrap(DefaultCatalog.models.first { $0.id == "anthropic:claude-haiku-4.5" })
         XCTAssertEqual(haiku.effortOptions, [.low])
     }
@@ -183,6 +183,13 @@ final class CosCoreTests: XCTestCase {
         XCTAssertTrue(request.availableSubagentRoutes.isEmpty)
         XCTAssertEqual(request.agentDepth, 0)
         XCTAssertNil(request.runControl)
+        XCTAssertFalse(request.browserEnabled)
+    }
+
+    func testBetterWrightUsesBoundedStableSessionNames() {
+        XCTAssertEqual(CosBetterWrightRuntime.sanitizedSession("Task 123 / Browser"), "task-123-browser")
+        XCTAssertEqual(CosBetterWrightRuntime.sanitizedSession("---"), "default")
+        XCTAssertLessThanOrEqual(CosBetterWrightRuntime.sanitizedSession(String(repeating: "a", count: 200)).count, 80)
     }
 
     func testRunControlKeepsSteeringFIFOAndBoundsQueue() async {

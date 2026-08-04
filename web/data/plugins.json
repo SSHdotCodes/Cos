@@ -55,6 +55,33 @@
     }
   },
   {
+    "id": "codes.ssh.cos.betterwright",
+    "name": "BetterWright Browser",
+    "version": "1.6.3",
+    "author": "BetterWright contributors",
+    "description": "Persistent, policy-guarded agentic browsing with a native loopback-only interactive live view inside Cos.",
+    "type": "plugin",
+    "featured": true,
+    "builtIn": true,
+    "tags": ["official", "browser", "playwright", "automation", "live-view"],
+    "downloads": "Built in",
+    "manifest": {
+      "schemaVersion": 1,
+      "id": "codes.ssh.cos.betterwright",
+      "name": "BetterWright Browser",
+      "version": "1.6.3",
+      "author": "BetterWright contributors",
+      "description": "A persistent, policy-guarded agentic browser with a native interactive live view inside Cos.",
+      "capabilities": [
+        {"id": "cos.browser.automation", "description": "Navigate and operate websites with bounded Playwright steps in an isolated BetterWright profile.", "risk": "guarded"},
+        {"id": "cos.browser.live-view", "description": "Stream and control the active task's browser in a loopback-only pane inside Cos.", "risk": "safe"}
+      ],
+      "skills": ["browser"],
+      "homepage": "https://github.com/BetterWright/betterwright",
+      "builtIn": true
+    }
+  },
+  {
     "id": "codes.ssh.cos.starter",
     "name": "Plugin Starter",
     "version": "1.0.0",

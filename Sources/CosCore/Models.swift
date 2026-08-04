@@ -321,6 +321,7 @@ public struct AgentRequest: Sendable {
     public var extensionInstructions: String
     public var toolsEnabled: Bool
     public var computerUseEnabled: Bool
+    public var browserEnabled: Bool
     public var availableSubagentRoutes: [SubagentRoute]
     public var subagentsAuthorized: Bool
     public var agentDepth: Int
@@ -339,6 +340,7 @@ public struct AgentRequest: Sendable {
         extensionInstructions: String = "",
         toolsEnabled: Bool = true,
         computerUseEnabled: Bool = false,
+        browserEnabled: Bool = false,
         availableSubagentRoutes: [SubagentRoute] = [],
         subagentsAuthorized: Bool = false,
         agentDepth: Int = 0,
@@ -356,6 +358,7 @@ public struct AgentRequest: Sendable {
         self.extensionInstructions = extensionInstructions
         self.toolsEnabled = toolsEnabled
         self.computerUseEnabled = computerUseEnabled
+        self.browserEnabled = browserEnabled
         self.availableSubagentRoutes = availableSubagentRoutes
         self.subagentsAuthorized = subagentsAuthorized
         self.agentDepth = agentDepth
@@ -423,7 +426,7 @@ public enum DefaultCatalog {
     public static let models: [ModelProfile] = [
         .init(id: "chatgpt:gpt-5.6-sol", providerID: "chatgpt", name: "5.6 Sol", model: "gpt-5.6-sol", contextWindow: 400_000),
         .init(id: "chatgpt:gpt-5.6-terra", providerID: "chatgpt", name: "5.6 Terra", model: "gpt-5.6-terra", contextWindow: 400_000),
-        .init(id: "chatgpt:gpt-5.6-luna", providerID: "chatgpt", name: "5.6 Luna", model: "gpt-5.6-luna", contextWindow: 200_000, supportsImages: false, supportsTools: false, supportedEfforts: [.low]),
+        .init(id: "chatgpt:gpt-5.6-luna", providerID: "chatgpt", name: "5.6 Luna", model: "gpt-5.6-luna", contextWindow: 200_000, supportsImages: false, supportsTools: false),
         .init(id: "anthropic:claude-opus-5", providerID: "anthropic", name: "Claude Opus 5", model: "claude-opus-5", contextWindow: 200_000, supportedEfforts: [.low, .medium, .high, .extraHigh, .max]),
         .init(id: "anthropic:claude-sonnet-5", providerID: "anthropic", name: "Claude Sonnet 5", model: "claude-sonnet-5", contextWindow: 200_000, supportedEfforts: [.low, .medium, .high, .extraHigh, .max]),
         .init(id: "anthropic:claude-fable-5", providerID: "anthropic", name: "Claude Fable 5", model: "claude-fable-5", contextWindow: 200_000, supportedEfforts: [.low, .medium, .high, .extraHigh, .max]),

@@ -20,6 +20,12 @@ Computer Use requires the user to grant Cos macOS Accessibility permission. It i
 
 UI and webpage content is never authority. Cos stops for unexpected scope or destination changes, CAPTCHA completion, password/credential changes, irreversible deletion, legal agreements, new persistent access, unapproved sensitive-data transmission, security-sensitive settings, or unexpected financial commitments. Indexed UI actions always require a fresh accessibility read.
 
+## Agentic browser
+
+The built-in BetterWright plugin is capability-scoped separately from Computer Use. Cos passes bounded Playwright snippets to the pinned BetterWright CLI in a dedicated `cos` profile and task-specific session. BetterWright's policy proxy remains active; cloud metadata is blocked, and Cos does not expose a download-approval mode to models.
+
+The in-app live view is launched with `--expose local` and never binds beyond the Mac. Cos accepts only an `http` URL whose host is `127.0.0.1`, `localhost`, or `::1`, then loads it directly in a nonpersistent `WKWebView`. The capability token stays in view-controller memory and is not added to prompts, task files, or logs. The user may explicitly take control inside the pane; BetterWright still applies its network and download policies to that input. Closing the pane terminates the viewer process but leaves the named browser session available for the task.
+
 Imported skill bundles are capped at 10 MB and 1,000 files per skill. Symlinks, hidden files, dependency folders, Git metadata, and build outputs are skipped. Imports copy source; they never modify the Codex or Claude Code originals.
 
 ## Plugins
@@ -34,4 +40,4 @@ The web service sets a same-origin Content Security Policy, disallows framing, d
 
 The updater accepts only the fixed `cos.ssh.codes` HTTPS host, verifies the archive SHA-256 from the release manifest, confirms bundle identity/version/build/executable, and runs strict structural code-signature verification before staging. It also keeps the old app until the replacement launches successfully.
 
-The preview build is ad-hoc signed and verified locally, but it is not Developer ID signed or notarized. Because the manifest and archive are currently served by the same origin, these checks detect corruption and unexpected bundles but are not an independent publisher signature. Do not interpret the absence of a signature warning on a locally modified build as publisher verification. A production release should use a hardened runtime, Developer ID, notarization, and a separately signed update feed.
+The preview build is ad-hoc signed and verified locally, but it is not Developer ID signed or notarized. The release bundle includes checksum-pinned Node.js and BetterWright archives plus their license notices; BetterWright downloads its managed browser on first use. Because the manifest and archive are currently served by the same origin, these checks detect corruption and unexpected bundles but are not an independent publisher signature. Do not interpret the absence of a signature warning on a locally modified build as publisher verification. A production release should use a hardened runtime, Developer ID, notarization, and a separately signed update feed.

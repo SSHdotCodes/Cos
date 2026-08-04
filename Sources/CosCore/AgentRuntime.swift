@@ -134,6 +134,7 @@ public struct AgentRuntime: Sendable {
             extensionInstructions: parent.extensionInstructions,
             toolsEnabled: true,
             computerUseEnabled: false,
+            browserEnabled: parent.browserEnabled,
             availableSubagentRoutes: [],
             subagentsAuthorized: false,
             agentDepth: parent.agentDepth + 1

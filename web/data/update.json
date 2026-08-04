@@ -1,8 +1,8 @@
 {
-  "version": "1.0.0",
-  "build": 100,
-  "downloadURL": "https://cos.ssh.codes/downloads/Cos-1.0.0-macOS-arm64.zip?v=1",
-  "sha256": "5f80f35f6fcd075afe7298e98eb3f6c7db1f21ecc8cb4253c046e1591c74a191",
+  "version": "1.0.1",
+  "build": 103,
+  "downloadURL": "https://cos.ssh.codes/downloads/Cos-1.0.1-macOS-arm64.zip?v=1",
+  "sha256": "ff847fa1646e4cca88fc66795cacceed80214fd8441f04a058c005365948f51d",
   "minimumSystemVersion": "15.0",
-  "releaseNotes": "Cos 1.0 brings the native provider-neutral harness, persistent goals and compaction, model-aware reasoning controls, a built-in marketplace, Computer Use, guarded self-management, skill import, and verified one-click updates."
+  "releaseNotes": "Cos 1.0.1 adds a native interactive BetterWright browser, steering, model-selectable subagents, provider marks, GPT-5.6 Luna's full effort range, and a smoother reasoning control."
 }

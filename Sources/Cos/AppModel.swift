@@ -10,6 +10,11 @@ struct PendingDirectoryTrust: Equatable {
     let prompt: String
 }
 
+struct PendingComputerUseRun: Equatable {
+    let threadID: UUID
+    let prompt: String
+}
+
 enum ExternalSkillSource: String, CaseIterable, Identifiable, Hashable {
     case codex
     case claudeCode
@@ -80,6 +85,8 @@ final class AppModel: ObservableObject {
     @Published var isLoadingMarketplace = false
     @Published var installingMarketplacePluginID: String?
     @Published var marketplaceError: String?
+    @Published var isBrowserPanelPresented = false
+    @Published var pendingComputerUseRun: PendingComputerUseRun?
 
     private let store = ThreadStore()
     private let runtime = AgentRuntime()
@@ -133,6 +140,10 @@ final class AppModel: ObservableObject {
 
     var canSteerSelectedThread: Bool {
         isRunning && selectedThreadID == activeRunThreadID
+    }
+
+    var isBetterWrightEnabled: Bool {
+        plugins.contains { $0.id == "codes.ssh.cos.betterwright" && $0.isEnabled }
     }
 
     var subagentRoutes: [SubagentRoute] {
@@ -359,6 +370,21 @@ final class AppModel: ObservableObject {
                 return
             }
         }
+        let computerUseEnabled = plugins.contains { $0.id == "codes.ssh.cos.computer-use" && $0.isEnabled }
+        computerUseAccessGranted = CosComputerUseAccess.isGranted
+        if computerUseEnabled,
+           Self.looksLikeComputerUseRequest(prompt),
+           !computerUseAccessGranted {
+            pendingComputerUseRun = .init(threadID: threads[index].id, prompt: prompt)
+            threads[index].messages.append(.init(
+                role: .assistant,
+                content: "Cos needs macOS Accessibility access for this task. I’ll continue automatically as soon as the permission becomes active."
+            ))
+            threads[index].updatedAt = Date()
+            persist(threads[index])
+            requestComputerUseAccess()
+            return
+        }
         let assistantID = UUID()
         let runID = UUID()
         let runControl = AgentRunControl()
@@ -395,10 +421,7 @@ final class AppModel: ObservableObject {
         let referenceContext = ComposerReferenceResolver.referenceContext(in: prompt, plugins: referencePlugins)
         let subagentsAuthorized = SubagentAuthorization.isExplicitlyRequested(in: prompt)
         let availableSubagentRoutes = subagentRoutes
-        let computerUseEnabled = plugins.contains { $0.id == "codes.ssh.cos.computer-use" && $0.isEnabled }
-        if computerUseEnabled, !computerUseAccessGranted, Self.looksLikeComputerUseRequest(prompt) {
-            requestComputerUseAccess()
-        }
+        let browserEnabled = isBetterWrightEnabled
         let effectivePrompt = """
         \(CosSettingsPlugin.systemPrompt)
 
@@ -421,6 +444,7 @@ final class AppModel: ObservableObject {
             workspaceIsTrusted: isWorkspaceTrusted(threads[index].workspacePath),
             extensionInstructions: activeExtensionInstructions(),
             computerUseEnabled: computerUseEnabled,
+            browserEnabled: browserEnabled,
             availableSubagentRoutes: availableSubagentRoutes,
             subagentsAuthorized: subagentsAuthorized,
             runControl: runControl
@@ -850,6 +874,8 @@ final class AppModel: ObservableObject {
         do {
             try setPlugin(id: plugin.id, enabled: enabled)
             if enabled, plugin.id == "codes.ssh.cos.computer-use" { requestComputerUseAccess() }
+            if !enabled, plugin.id == "codes.ssh.cos.computer-use" { pendingComputerUseRun = nil }
+            if !enabled, plugin.id == "codes.ssh.cos.betterwright" { isBrowserPanelPresented = false }
             Task { await reloadPlugins() }
         } catch {
             lastError = error.localizedDescription
@@ -950,8 +976,9 @@ final class AppModel: ObservableObject {
     private nonisolated static func looksLikeComputerUseRequest(_ prompt: String) -> Bool {
         let value = prompt.lowercased()
         if value.contains("@computer") || value.contains("computer use") { return true }
+        if value.contains("@betterwright") || value.contains("/browser") { return false }
         let actions = ["open ", "click ", "type ", "send ", "log in", "login", "navigate ", "go to "]
-        let destinations = [" app", "website", "browser", "safari", "chrome", "google", "chat "]
+        let destinations = [" app", "safari", "chrome", "chat "]
         return actions.contains(where: value.contains) && destinations.contains(where: value.contains)
     }
 
@@ -1228,7 +1255,10 @@ final class AppModel: ObservableObject {
 
     func refreshComputerUseAccess() {
         computerUseAccessGranted = CosComputerUseAccess.isGranted
-        if computerUseAccessGranted { computerUseAccessStatus = "Accessibility access granted" }
+        if computerUseAccessGranted {
+            computerUseAccessStatus = "Accessibility access granted"
+            resumePendingComputerUseRun()
+        }
     }
 
     func requestComputerUseAccess() {
@@ -1251,6 +1281,15 @@ final class AppModel: ObservableObject {
     func openAccessibilitySettings() {
         guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") else { return }
         NSWorkspace.shared.open(url)
+    }
+
+    private func resumePendingComputerUseRun() {
+        guard computerUseAccessGranted,
+              !isRunning,
+              let pendingComputerUseRun,
+              selectedThreadID == pendingComputerUseRun.threadID else { return }
+        self.pendingComputerUseRun = nil
+        startRun(pendingComputerUseRun.prompt, appendUserMessage: false)
     }
 
     func installPluginFromDisk() {

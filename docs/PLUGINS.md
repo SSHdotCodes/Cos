@@ -32,6 +32,8 @@ The built-in `codes.ssh.cos.settings` plugin accepts only allowlisted settings p
 
 `codes.ssh.cos.computer-use` is a first-party bundled plugin. Computer Use exposes native accessibility tools with explicit intent scoping.
 
+`codes.ssh.cos.betterwright` bundles the BetterWright browser skill and guarded `browser_run` capability. The release app carries a pinned BetterWright 1.6.3 CLI and portable Node runtime; its managed browser installs once on demand. The native Browser inspector is loopback-only and interactive, and it attaches to the same task session used by browser tools.
+
 Settings → Import discovers portable `SKILL.md` bundles in `~/.codex/skills`, `~/.claude/skills`, or a folder the user selects. Imported bundles become ordinary local plugins and can be disabled or moved to Trash without touching their source.
 
 ## Install and publish
@@ -42,4 +44,4 @@ The website submission form posts metadata and an HTTPS manifest URL to a modera
 
 ## Trust boundary
 
-Version 0.2 parses and displays manifests but does not yet implement package signatures or a sandboxed executable plugin host. Treat third-party plugin resources as code: inspect them and grant only the capabilities you understand. Project-local manifests are not marked trusted automatically.
+Version 1.0.1 parses and displays manifests but does not yet implement package signatures or a sandboxed executable plugin host. Treat third-party plugin resources as code: inspect them and grant only the capabilities you understand. Project-local manifests are not marked trusted automatically.

@@ -113,19 +113,20 @@ struct ComposerView: View {
                 Spacer(minLength: 4)
 
                 Button { modelPopover.toggle() } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "bolt.fill")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(CosTheme.blue)
-                            .frame(width: 10)
-                            .opacity(model.selectedModel.supportsFastMode && model.preferences.fastMode ? 1 : 0)
+                    HStack(spacing: 6) {
+                        if model.selectedModel.supportsFastMode && model.preferences.fastMode {
+                            Image(systemName: "bolt.fill")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(CosTheme.blue)
+                        }
                         Text(model.selectedModel.name)
                             .lineLimit(1)
-                            .frame(width: 64, alignment: .trailing)
+                            .layoutPriority(1)
+                        ProviderMark(providerID: model.selectedModel.providerID, size: 13)
+                        Spacer(minLength: 0)
                         Text(model.selectedThread?.effort.shortTitle ?? model.preferences.defaultEffort.shortTitle)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
-                            .frame(width: 58, alignment: .trailing)
                         Image(systemName: "chevron.down")
                             .font(.system(size: 8, weight: .semibold))
                             .foregroundStyle(.secondary)
@@ -133,7 +134,7 @@ struct ComposerView: View {
                     .font(.system(size: 11.5, weight: .medium))
                     .padding(.horizontal, 9)
                     .frame(height: 28)
-                    .frame(width: 176)
+                    .frame(width: 194)
                     .background(.primary.opacity(0.055), in: Capsule())
                 }
                 .buttonStyle(.plain)
@@ -495,6 +496,7 @@ private struct ModelPickerView: View {
                                         if model.selectedModel.id == item.id {
                                             Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)).foregroundStyle(CosTheme.blue)
                                         }
+                                        ProviderMark(providerID: item.providerID, size: 15)
                                     }
                                     .contentShape(Rectangle())
                                     .padding(.horizontal, 10)
@@ -578,6 +580,8 @@ struct EffortSlider: View {
             let selectedIndex = options.firstIndex(of: selection) ?? 0
             let selectedPosition = inset + CGFloat(selectedIndex) * step
             let thumbPosition = dragPosition ?? selectedPosition
+            let normalizedPosition = min(max((thumbPosition - inset) / max(usable, 1), 0), 1)
+            let sunIntensity = max(0, (normalizedPosition - 0.2) / 0.8)
             ZStack(alignment: .leading) {
                 Capsule().fill(.primary.opacity(0.12)).frame(height: 24)
                 Capsule()
@@ -589,10 +593,7 @@ struct EffortSlider: View {
                         .frame(width: 4, height: 4)
                         .position(x: inset + CGFloat(index) * step, y: 14)
                 }
-                Circle()
-                    .fill(.white)
-                    .frame(width: 28, height: 28)
-                    .shadow(color: .black.opacity(0.16), radius: 3, y: 1)
+                ReasoningSunThumb(intensity: sunIntensity, isDragging: dragPosition != nil)
                     .position(x: thumbPosition, y: 14)
             }
             .contentShape(Rectangle())
@@ -622,5 +623,47 @@ struct EffortSlider: View {
             @unknown default: break
             }
         }
+    }
+}
+
+private struct ReasoningSunThumb: View {
+    let intensity: CGFloat
+    let isDragging: Bool
+
+    var body: some View {
+        ZStack {
+            ForEach(0..<8, id: \.self) { index in
+                Capsule()
+                    .fill(.white.opacity(0.88 * intensity))
+                    .frame(width: 1.5, height: 4)
+                    .offset(y: -15)
+                    .rotationEffect(.degrees(Double(index) * 45))
+            }
+
+            Circle()
+                .fill(.white)
+                .overlay {
+                    Circle()
+                        .fill(
+                            RadialGradient(
+                                colors: [
+                                    .white,
+                                    Color(red: 1, green: 0.91, blue: 0.64).opacity(intensity),
+                                ],
+                                center: .center,
+                                startRadius: 2,
+                                endRadius: 14
+                            )
+                        )
+                        .opacity(intensity * 0.72)
+                }
+                .frame(width: 28, height: 28)
+                .shadow(color: .white.opacity(0.62 * intensity), radius: 3 + 7 * intensity)
+                .shadow(color: Color(red: 1, green: 0.72, blue: 0.25).opacity(0.52 * intensity), radius: 2 + 8 * intensity)
+                .shadow(color: .black.opacity(0.16), radius: 3, y: 1)
+        }
+        .frame(width: 28, height: 28)
+        .animation(isDragging ? nil : .easeInOut(duration: 0.2), value: intensity)
+        .accessibilityHidden(true)
     }
 }

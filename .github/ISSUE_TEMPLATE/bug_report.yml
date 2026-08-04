@@ -10,7 +10,7 @@ body:
     id: version
     attributes:
       label: Cos version
-      placeholder: 1.0.0 (100)
+      placeholder: 1.0.1 (103)
     validations:
       required: true
   - type: input

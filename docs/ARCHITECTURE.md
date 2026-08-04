@@ -2,7 +2,7 @@
 
 ## Design target
 
-Cos keeps the resident app small. SwiftUI owns windows and interaction state; the native Swift `CosHarness` owns provider streaming and tool orchestration; Security owns secrets. There is no embedded browser or resident third-party agent runtime.
+Cos keeps the resident app small. SwiftUI owns windows and interaction state; the native Swift `CosHarness` owns provider streaming and tool orchestration; Security owns secrets. BetterWright and its managed browser are lazy processes used only for web tasks, never a replacement coding-agent harness.
 
 ## Runtime flow
 
@@ -13,7 +13,7 @@ Composer
   → AgentRuntime resolves a local credential and directory trust
   → CosHarness runs one bounded provider-neutral tool loop
       → ChatGPT Responses / Anthropic Messages / OpenAI-compatible SSE
-      → workspace file, search, patch, Full Access command, and native macOS accessibility tools
+      → workspace file, search, patch, Full Access command, native macOS accessibility, and BetterWright browser tools
       → explicitly authorized, allowlisted Cos subagents with independently resolved model credentials and effort
   → AgentEvent stream updates the answer and structured work trace
   → ThreadStore atomically persists the finished snapshot
@@ -21,13 +21,15 @@ Composer
 
 The harness permits at most 24 tool steps, bounds response and tool-result buffers, truncates its in-run transcript, and streams provider bytes instead of retaining full network responses. Login CLIs can bootstrap subscription credentials, but no external agent CLI runs the task.
 
-Steering is generation-tagged in `AppModel`: an active provider stream is canceled, its partial work segment is closed and retained, the steering message is appended, and a replacement run begins from the updated conversation. Completion and failure handlers must match the active generation, thread, and assistant IDs, so an interrupted run cannot clear or overwrite its successor.
+Steering uses a per-run `AgentRunControl`: new instructions enter a bounded FIFO queue and interrupt only the currently installed provider turn. The same `CosHarness` loop appends the ordered steering transcript, preserves prior tool/work events, and continues from the updated prompt. Run, thread, and assistant IDs still guard UI completion so stale events cannot overwrite the active segment.
 
-Subagents use the same `CosHarness`, workspace trust, Full Access boundary, extensions, and native tools as the parent. The runtime builds an allowlist from enabled models whose providers have a resolvable local credential. Model output can select only a stable allowlisted model ID and an effort that model declares. Child runs cannot create grandchildren, Computer Use is not inherited, execution is sequential, and the parent caps delegation at six calls.
+Subagents use the same `CosHarness`, workspace trust, Full Access boundary, extensions, and native tools as the parent. The runtime builds an allowlist from enabled models whose providers have a resolvable local credential. Model output can select only a stable allowlisted model ID and an effort that model declares. Child runs cannot create grandchildren, Computer Use is not inherited, BetterWright availability follows the enabled browser plugin, execution is sequential, and the parent caps delegation at six calls.
 
 Enabled plugin skill files are injected into a bounded extension context. The model can call one native Cos tool at a time; meaningful statuses, reasoning summaries, and every tool invocation become work-trace events that auto-collapse after completion. Redundant harness-start bookkeeping is not shown.
 
 Computer Use enumerates a fresh macOS accessibility tree for every indexed action and deliberately retains no stale element handles. The newest user-authored request is injected separately as its authority boundary; ordinary steps inside that request continue without another prompt, while third-party UI content cannot expand the scope.
+
+BetterWright uses a pinned CLI and portable Node runtime bundled in release builds. Each Cos task maps to a bounded BetterWright session name under the dedicated `cos` profile. `browser_run` performs small Playwright action-and-observe steps against that persistent session. The SwiftUI inspector starts a loopback-only interactive `betterwright view` for the same session, validates the returned URL, and loads it through a narrow `WKWebView` bridge. Native controls can close the active tab or detach the viewer without destroying the remaining task session. The roughly 200 MB managed browser is installed once on demand and stays out of the resident app process.
 
 The skill importer copies bounded portable bundles into a dedicated local plugin, preserving `SKILL.md`, scripts, references, and assets while skipping symlinks and build/dependency directories. Codex and Claude Code source folders remain unchanged. The plugin window also loads the moderated `cos.ssh.codes` catalog directly, supports search, and installs validated matching manifests into Cos-managed storage.
 
