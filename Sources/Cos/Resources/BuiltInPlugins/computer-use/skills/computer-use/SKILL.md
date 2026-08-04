@@ -10,11 +10,13 @@ Operate the named app until the user’s requested outcome is complete.
 ## Workflow
 
 1. Call `computer_get_state` with the requested app. Call `computer_list_apps` first only when the app cannot be identified.
-2. Prefer semantic `element_index` actions over coordinates.
+2. Prefer semantic `element_index` actions over coordinates. The state surfaces focused/editable fields and navigation controls before its bounded outline.
 3. After every action, call `computer_get_state` again and use only the fresh indices.
-4. Use `computer_click`, `computer_set_value`, `computer_type_text`, `computer_press_key`, and `computer_scroll` as needed.
-5. Continue through ordinary intermediate screens without narrating or asking the user to approve each step.
-6. Report the completed outcome, or the exact hard stop if macOS or the destination requires the user.
+4. Use `computer_click`, `computer_drag`, `computer_set_value`, `computer_type_text`, `computer_press_key`, `computer_scroll`, `computer_select_text`, and `computer_secondary_action` as needed.
+5. If a webview has a sparse outline, use a known app shortcut, type into the focused control without an `element_index`, or use a visually grounded coordinate click. Fetch fresh state instead of giving up.
+6. For Discord-style clients, press `command+k`, type the requested channel, press Return, fetch state, focus the message text area, type the exact message, press Return, and fetch state again to verify it appeared.
+7. Continue through ordinary intermediate screens without narrating or asking the user to approve each step.
+8. Report the completed outcome, or the exact hard stop if macOS or the destination requires the user.
 
 ## Authorization
 
@@ -44,4 +46,4 @@ Do not repeat a confirmation when the user already explicitly authorized the spe
 
 ## Efficiency
 
-Keep accessibility reads bounded and action-oriented. Do not retain stale indices. Avoid repeatedly listing apps, rereading unchanged trees, or using coordinate clicks when a semantic action is available.
+Keep accessibility reads bounded and action-oriented. Do not retain stale indices. Avoid repeatedly listing apps, rereading unchanged trees, or using coordinate clicks when a semantic action is available. Do not report an app as uncontrollable after only one sparse state; try the applicable focused-keyboard workflow and inspect again.

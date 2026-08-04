@@ -1,8 +1,8 @@
 {
-  "version": "1.0.1",
-  "build": 103,
-  "downloadURL": "https://cos.ssh.codes/downloads/Cos-1.0.1-macOS-arm64.zip?v=1",
-  "sha256": "5b4baef79494c9ebbfacd0df2932d272aac90da6f896b5d9f4c265f16213815f",
+  "version": "1.0.2",
+  "build": 104,
+  "downloadURL": "https://cos.ssh.codes/downloads/Cos-1.0.2-macOS-arm64.zip?v=1",
+  "sha256": "0990e2c1af2b8fa218bb499d0f8f96500356bf5d0839cfea3f953d0c32822535",
   "minimumSystemVersion": "15.0",
-  "releaseNotes": "Cos 1.0.1 adds a native interactive BetterWright browser, steering, model-selectable subagents, provider marks, GPT-5.6 Luna's full effort range, and a smoother reasoning control."
+  "releaseNotes": "Cos 1.0.2 reliably executes incomplete model tool markers, keeps tool protocol out of chat, cleans reasoning summaries, and restores BetterWright navigation for lightweight models."
 }

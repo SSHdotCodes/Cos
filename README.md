@@ -49,9 +49,9 @@ The interface includes System, Light, Dark, and True Dark themes, an expandable 
 
 ## Install
 
-Cos 1.0.1 supports Apple silicon Macs running macOS 15 or later.
+Cos 1.0.2 supports Apple silicon Macs running macOS 15 or later.
 
-1. Download the [Cos 1.0.1 DMG](https://github.com/SSHDotCodes/Cos/releases/download/v1.0.1/Cos-1.0.1.dmg) or [ZIP](https://github.com/SSHDotCodes/Cos/releases/download/v1.0.1/Cos-1.0.1-macOS-arm64.zip).
+1. Download the [Cos 1.0.2 DMG](https://github.com/SSHDotCodes/Cos/releases/download/v1.0.2/Cos-1.0.2.dmg) or [ZIP](https://github.com/SSHDotCodes/Cos/releases/download/v1.0.2/Cos-1.0.2-macOS-arm64.zip).
 2. Move `Cos.app` to Applications.
 3. Open Cos and configure a provider in **Settings → Providers**.
 
@@ -75,7 +75,7 @@ While Cos is working, type a correction or added instruction and press Command�
 
 ## Agentic browser
 
-Enable the built-in BetterWright Browser plugin and click the Browser button in the task header (or press Shift–Command–B). Cos uses a persistent task-specific BetterWright session for `browser_run` tools and attaches the right-side pane to that same session. The viewer binds only to loopback; you can take control, switch tabs, or close the active tab from Cos. The managed browser is a one-time, on-demand download and is not resident when unused.
+Enable the built-in BetterWright Browser plugin and click the Browser button in the task header (or press Shift–Command–B). Cos uses a persistent task-specific BetterWright session for browser tools and attaches the right-side pane to that same session. The viewer binds only to loopback; you can take control, switch tabs, or close the active tab from Cos. The managed browser is a one-time, on-demand download and is not resident when unused.
 
 Use `/subagent` or choose **+ → Ask a subagent** to prefill an exact model and reasoning effort. Cos only offers locally connected providers, validates the model-specific effort allowlist, runs one child at a time, and returns child tools and status inside the parent work trace.
 

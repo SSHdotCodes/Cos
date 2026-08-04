@@ -99,6 +99,7 @@ final class AppModel: ObservableObject {
     private var activeRunThreadID: UUID?
     private var activeRunAssistantID: UUID?
     private var activeRunControl: AgentRunControl?
+    private var reasoningBuffers: [UUID: String] = [:]
     private var titleTasks: [UUID: Task<Void, Never>] = [:]
     private var updateCheckTask: Task<Void, Never>?
     private var lastUpdateCheck: Date?
@@ -596,6 +597,7 @@ final class AppModel: ObservableObject {
 
     private func appendWork(_ item: WorkTraceItem, assistantID: UUID, threadIndex: Int, coalesce: Bool) {
         guard let messageIndex = threads[threadIndex].messages.firstIndex(where: { $0.id == assistantID }) else { return }
+        if item.kind != .reasoning { reasoningBuffers[assistantID] = nil }
         var items = threads[threadIndex].messages[messageIndex].workItems ?? []
         if coalesce, items.last?.kind == item.kind, items.last?.title == item.title { return }
         if items.count < 120 { items.append(item) }
@@ -606,10 +608,17 @@ final class AppModel: ObservableObject {
         guard !text.isEmpty,
               let messageIndex = threads[threadIndex].messages.firstIndex(where: { $0.id == assistantID }) else { return }
         var items = threads[threadIndex].messages[messageIndex].workItems ?? []
+        var raw: String
         if let last = items.indices.last, items[last].kind == .reasoning, items[last].detail.utf8.count < 24_000 {
-            items[last].detail += text
+            raw = reasoningBuffers[assistantID] ?? items[last].detail
+            raw += text
+            if raw.utf8.count > 24_000 { raw = String(raw.suffix(24_000)) }
+            reasoningBuffers[assistantID] = raw
+            items[last].detail = CosOutputSanitizer.reasoning(raw)
         } else if items.count < 120 {
-            items.append(.init(kind: .reasoning, title: "Reasoning", detail: text))
+            raw = text
+            reasoningBuffers[assistantID] = raw
+            items.append(.init(kind: .reasoning, title: "Reasoning", detail: CosOutputSanitizer.reasoning(raw)))
         }
         threads[threadIndex].messages[messageIndex].workItems = items
     }
@@ -637,6 +646,7 @@ final class AppModel: ObservableObject {
         }
         let detail = messages.map(\.content).joined(separator: "\n")
         threads[threadIndex].messages[messageIndex].isStreaming = false
+        reasoningBuffers[assistantID] = nil
         appendWork(
             .init(kind: .status, title: "Steered", detail: detail),
             assistantID: assistantID,
@@ -663,7 +673,9 @@ final class AppModel: ObservableObject {
     private func finishAssistant(id: UUID, threadID: UUID) {
         guard let threadIndex = threads.firstIndex(where: { $0.id == threadID }),
               let messageIndex = threads[threadIndex].messages.firstIndex(where: { $0.id == id }) else { return }
-        let extracted = CosSettingsPlugin.extract(from: threads[threadIndex].messages[messageIndex].content)
+        reasoningBuffers[id] = nil
+        let visibleContent = CosOutputSanitizer.assistantText(threads[threadIndex].messages[messageIndex].content)
+        let extracted = CosSettingsPlugin.extract(from: visibleContent)
         threads[threadIndex].messages[messageIndex].content = extracted.visibleText
         threads[threadIndex].messages[messageIndex].isStreaming = false
         if let mutation = extracted.mutation { apply(mutation) }
@@ -682,6 +694,7 @@ final class AppModel: ObservableObject {
     private func failAssistant(id: UUID, threadID: UUID, retryPrompt: String, error: Error) {
         guard let threadIndex = threads.firstIndex(where: { $0.id == threadID }),
               let messageIndex = threads[threadIndex].messages.firstIndex(where: { $0.id == id }) else { return }
+        reasoningBuffers[id] = nil
         if let runtimeError = error as? AgentRuntimeError,
            case .directoryTrustRequired(let workspacePath) = runtimeError {
             threads[threadIndex].messages.remove(at: messageIndex)
