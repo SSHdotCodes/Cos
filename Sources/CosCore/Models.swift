@@ -138,6 +138,54 @@ public struct ModelProfile: Codable, Identifiable, Hashable, Sendable {
     }
 }
 
+public struct SubagentRoute: Identifiable, Hashable, Sendable {
+    public var model: ModelProfile
+    public var provider: ProviderProfile
+
+    public init(model: ModelProfile, provider: ProviderProfile) {
+        self.model = model
+        self.provider = provider
+    }
+
+    public var id: String { model.id }
+
+    public func accepts(_ effort: ReasoningEffort) -> Bool {
+        model.effortOptions.contains(effort)
+    }
+}
+
+public struct CosSubagentRequest: Hashable, Sendable {
+    public var task: String
+    public var modelID: String
+    public var effort: ReasoningEffort
+
+    public init(task: String, modelID: String, effort: ReasoningEffort) {
+        self.task = task
+        self.modelID = modelID
+        self.effort = effort
+    }
+}
+
+public typealias CosSubagentRunner = @Sendable (CosSubagentRequest) throws -> AsyncThrowingStream<AgentEvent, Error>
+
+public enum SubagentAuthorization {
+    public static func isExplicitlyRequested(in prompt: String) -> Bool {
+        let value = prompt.lowercased()
+        guard !isExplicitlyForbidden(in: value) else { return false }
+        return value.contains("/subagent")
+            || value.contains("subagent")
+            || value.contains("sub-agent")
+            || value.contains("delegate to another model")
+            || value.contains("delegate this to")
+    }
+
+    public static func isExplicitlyForbidden(in prompt: String) -> Bool {
+        let value = prompt.lowercased()
+        return ["do not use subagent", "don't use subagent", "no subagent", "without subagent"]
+            .contains(where: value.contains)
+    }
+}
+
 public enum MessageRole: String, Codable, Sendable {
     case system
     case user
@@ -149,6 +197,7 @@ public enum WorkTraceKind: String, Codable, Sendable {
     case status
     case reasoning
     case tool
+    case subagent
 }
 
 public struct WorkTraceItem: Codable, Identifiable, Hashable, Sendable {
@@ -270,6 +319,13 @@ public struct AgentRequest: Sendable {
     public var fullAccess: Bool
     public var workspaceIsTrusted: Bool
     public var extensionInstructions: String
+    public var toolsEnabled: Bool
+    public var computerUseEnabled: Bool
+    public var browserEnabled: Bool
+    public var availableSubagentRoutes: [SubagentRoute]
+    public var subagentsAuthorized: Bool
+    public var agentDepth: Int
+    public var runControl: AgentRunControl?
 
     public init(
         prompt: String,
@@ -281,7 +337,14 @@ public struct AgentRequest: Sendable {
         fastMode: Bool,
         fullAccess: Bool,
         workspaceIsTrusted: Bool = false,
-        extensionInstructions: String = ""
+        extensionInstructions: String = "",
+        toolsEnabled: Bool = true,
+        computerUseEnabled: Bool = false,
+        browserEnabled: Bool = false,
+        availableSubagentRoutes: [SubagentRoute] = [],
+        subagentsAuthorized: Bool = false,
+        agentDepth: Int = 0,
+        runControl: AgentRunControl? = nil
     ) {
         self.prompt = prompt
         self.latestUserRequest = latestUserRequest ?? prompt
@@ -293,6 +356,13 @@ public struct AgentRequest: Sendable {
         self.fullAccess = fullAccess
         self.workspaceIsTrusted = workspaceIsTrusted
         self.extensionInstructions = extensionInstructions
+        self.toolsEnabled = toolsEnabled
+        self.computerUseEnabled = computerUseEnabled
+        self.browserEnabled = browserEnabled
+        self.availableSubagentRoutes = availableSubagentRoutes
+        self.subagentsAuthorized = subagentsAuthorized
+        self.agentDepth = agentDepth
+        self.runControl = runControl
     }
 }
 
@@ -301,6 +371,8 @@ public enum AgentEvent: Sendable, Equatable {
     case workDelta(String)
     case textDelta(String)
     case tool(name: String, detail: String)
+    case subagent(name: String, detail: String)
+    case steeringApplied([SteeringMessage])
     case usage(input: Int, output: Int)
     case completed
 }
@@ -317,6 +389,7 @@ public struct AppPreferences: Codable, Equatable, Sendable {
     public var defaultWorkspace = FileManager.default.homeDirectoryForCurrentUser.path
     public var selectedModelID = DefaultCatalog.models[0].id
     public var defaultEffort = ReasoningEffort.high
+    public var titleModelID: String?
 
     public init() {}
 }
@@ -353,9 +426,11 @@ public enum DefaultCatalog {
     public static let models: [ModelProfile] = [
         .init(id: "chatgpt:gpt-5.6-sol", providerID: "chatgpt", name: "5.6 Sol", model: "gpt-5.6-sol", contextWindow: 400_000),
         .init(id: "chatgpt:gpt-5.6-terra", providerID: "chatgpt", name: "5.6 Terra", model: "gpt-5.6-terra", contextWindow: 400_000),
+        .init(id: "chatgpt:gpt-5.6-luna", providerID: "chatgpt", name: "5.6 Luna", model: "gpt-5.6-luna", contextWindow: 200_000, supportsImages: false, supportsTools: false),
         .init(id: "anthropic:claude-opus-5", providerID: "anthropic", name: "Claude Opus 5", model: "claude-opus-5", contextWindow: 200_000, supportedEfforts: [.low, .medium, .high, .extraHigh, .max]),
         .init(id: "anthropic:claude-sonnet-5", providerID: "anthropic", name: "Claude Sonnet 5", model: "claude-sonnet-5", contextWindow: 200_000, supportedEfforts: [.low, .medium, .high, .extraHigh, .max]),
         .init(id: "anthropic:claude-fable-5", providerID: "anthropic", name: "Claude Fable 5", model: "claude-fable-5", contextWindow: 200_000, supportedEfforts: [.low, .medium, .high, .extraHigh, .max]),
+        .init(id: "anthropic:claude-haiku-4.5", providerID: "anthropic", name: "Claude Haiku 4.5", model: "claude-haiku-4.5", contextWindow: 200_000, supportsImages: false, supportsTools: false, supportedEfforts: [.low]),
         .init(id: "xai:grok-4.5", providerID: "xai", name: "Grok 4.5", model: "grok-4.5", contextWindow: 256_000, supportedEfforts: [.low, .medium, .high]),
         .init(id: "opencode-go:big-pickle", providerID: "opencode-go", name: "Big Pickle", model: "opencode/big-pickle", contextWindow: 200_000),
         .init(id: "qwen:qwen3.8-max", providerID: "qwen", name: "Qwen 3.8 Max", model: "qwen3.8-max", contextWindow: 262_144),

@@ -23,10 +23,26 @@ public enum AgentRuntimeError: LocalizedError {
 public struct AgentCredential: Sendable {
     public var token: String
     public var accountID: String?
+    public var email: String?
 
-    public init(token: String, accountID: String? = nil) {
+    public init(token: String, accountID: String? = nil, email: String? = nil) {
         self.token = token
         self.accountID = accountID
+        self.email = email
+    }
+}
+
+public struct ProviderSessionInfo: Equatable, Sendable {
+    public var email: String?
+    public var accountID: String?
+
+    public init(email: String? = nil, accountID: String? = nil) {
+        self.email = email
+        self.accountID = accountID
+    }
+
+    public var displayName: String {
+        email ?? accountID ?? "Connected subscription"
     }
 }
 
@@ -46,8 +62,89 @@ public struct AgentRuntime: Sendable {
             throw AgentRuntimeError.directoryTrustRequired(request.thread.workspacePath)
         }
 
+        let (routedRequest, credential) = try routedRequestAndCredential(for: request)
+        return harness.stream(
+            request: routedRequest,
+            credential: credential,
+            subagentRunner: { subagentRequest in
+                try subagentStream(parent: routedRequest, request: subagentRequest)
+            }
+        )
+    }
+
+    public func accessibleSubagentRoutes(
+        providers: [ProviderProfile],
+        models: [ModelProfile]
+    ) -> [SubagentRoute] {
+        let providerPairs: [(String, ProviderProfile)] = providers.compactMap { provider in
+            guard provider.isEnabled,
+                  provider.bridge != .pi,
+                  (try? credential(for: provider)) != nil else { return nil }
+            return (provider.id, provider)
+        }
+        let usableProviders = Dictionary(uniqueKeysWithValues: providerPairs)
+        return models.compactMap { model in
+            guard model.supportsTools, let provider = usableProviders[model.providerID] else { return nil }
+            return SubagentRoute(model: model, provider: provider)
+        }
+    }
+
+    public func sessionInfo(for provider: ProviderProfile) -> ProviderSessionInfo? {
+        guard provider.authMode == .subscription,
+              let credential = try? credentials.subscriptionCredential(for: provider) else { return nil }
+        return ProviderSessionInfo(email: credential.email, accountID: credential.accountID)
+    }
+
+    private func subagentStream(
+        parent: AgentRequest,
+        request: CosSubagentRequest
+    ) throws -> AsyncThrowingStream<AgentEvent, Error> {
+        guard parent.subagentsAuthorized, parent.agentDepth == 0 else {
+            throw AgentRuntimeError.launchFailed("subagents were not authorized by the user for this run")
+        }
+        guard let route = parent.availableSubagentRoutes.first(where: { $0.id == request.modelID }) else {
+            throw AgentRuntimeError.launchFailed("\(request.modelID) is not in this run's accessible subagent model allowlist")
+        }
+        guard route.accepts(request.effort) else {
+            let valid = route.model.effortOptions.map(\.title).joined(separator: ", ")
+            throw AgentRuntimeError.launchFailed("\(route.model.name) does not support \(request.effort.title) reasoning. Available efforts: \(valid)")
+        }
+
+        let childThread = CosThread(
+            workspacePath: parent.thread.workspacePath,
+            modelID: route.model.id,
+            effort: request.effort,
+            messages: [.init(role: .user, content: request.task)]
+        )
+        let childRequest = AgentRequest(
+            prompt: """
+            You are a focused Cos subagent. Complete this bounded delegated task and return a concise, evidence-based result to the parent agent.
+
+            Delegated task:
+            \(request.task)
+            """,
+            latestUserRequest: request.task,
+            thread: childThread,
+            model: route.model,
+            provider: route.provider,
+            effort: request.effort,
+            fastMode: parent.fastMode && route.model.supportsFastMode,
+            fullAccess: parent.fullAccess,
+            workspaceIsTrusted: parent.workspaceIsTrusted,
+            extensionInstructions: parent.extensionInstructions,
+            toolsEnabled: true,
+            computerUseEnabled: false,
+            browserEnabled: parent.browserEnabled,
+            availableSubagentRoutes: [],
+            subagentsAuthorized: false,
+            agentDepth: parent.agentDepth + 1
+        )
+        let (routedRequest, credential) = try routedRequestAndCredential(for: childRequest)
+        return harness.stream(request: routedRequest, credential: credential, subagentRunner: nil)
+    }
+
+    private func routedRequestAndCredential(for request: AgentRequest) throws -> (AgentRequest, AgentCredential) {
         var routedRequest = request
-        let credential: AgentCredential?
         if request.provider.bridge == .pi {
             guard let chatGPT = DefaultCatalog.providers.first(where: { $0.id == "chatgpt" }),
                   let model = DefaultCatalog.models.first(where: { $0.providerID == "chatgpt" }) else {
@@ -55,18 +152,26 @@ public struct AgentRuntime: Sendable {
             }
             routedRequest.provider = chatGPT
             routedRequest.model = model
-            credential = try credentials.subscriptionCredential(for: chatGPT)
-        } else if let account = request.provider.keychainAccount,
-                  let token = try secureStore.get(account: account) {
-            credential = AgentCredential(token: token)
-        } else if request.provider.authMode == .subscription {
-            credential = try credentials.subscriptionCredential(for: request.provider)
-        } else {
-            credential = nil
+            guard let credential = try credential(for: chatGPT) else {
+                throw AgentRuntimeError.missingAPIKey(chatGPT.name)
+            }
+            return (routedRequest, credential)
         }
+        guard let credential = try credential(for: request.provider) else {
+            throw AgentRuntimeError.missingAPIKey(request.provider.name)
+        }
+        return (routedRequest, credential)
+    }
 
-        guard let credential else { throw AgentRuntimeError.missingAPIKey(request.provider.name) }
-        return harness.stream(request: routedRequest, credential: credential)
+    private func credential(for provider: ProviderProfile) throws -> AgentCredential? {
+        if let account = provider.keychainAccount,
+           let token = try secureStore.get(account: account) {
+            return AgentCredential(token: token)
+        }
+        if provider.authMode == .subscription {
+            return try credentials.subscriptionCredential(for: provider)
+        }
+        return nil
     }
 }
 
@@ -95,7 +200,11 @@ private struct LocalSubscriptionCredentialResolver: Sendable {
               let access = tokens["access_token"] as? String,
               !access.isEmpty else { return nil }
         let account = (tokens["account_id"] as? String) ?? accountID(fromJWT: access)
-        return AgentCredential(token: access, accountID: account)
+        let idToken = tokens["id_token"] as? String
+        let email = findString(named: "email", in: root)
+            ?? idToken.flatMap { string(named: "email", inJWT: $0) }
+            ?? string(named: "email", inJWT: access)
+        return AgentCredential(token: access, accountID: account, email: email)
     }
 
     private func openCodeCredential(named name: String) -> AgentCredential? {
@@ -103,7 +212,9 @@ private struct LocalSubscriptionCredentialResolver: Sendable {
         guard let root = json(at: url), let entry = root[name] as? [String: Any] else { return nil }
         for key in ["access", "token", "key"] {
             if let token = entry[key] as? String, !token.isEmpty {
-                return AgentCredential(token: token, accountID: entry["accountId"] as? String)
+                let account = (entry["accountId"] as? String) ?? accountID(fromJWT: token)
+                let email = (entry["email"] as? String) ?? string(named: "email", inJWT: token)
+                return AgentCredential(token: token, accountID: account, email: email)
             }
         }
         return nil
@@ -112,7 +223,13 @@ private struct LocalSubscriptionCredentialResolver: Sendable {
     private func credentialFromJSON(at url: URL, preferredKeys: [String]) -> AgentCredential? {
         guard let object = json(at: url) else { return nil }
         for key in preferredKeys {
-            if let token = findString(named: key, in: object) { return AgentCredential(token: token) }
+            if let token = findString(named: key, in: object) {
+                return AgentCredential(
+                    token: token,
+                    accountID: findString(named: "account_id", in: object) ?? accountID(fromJWT: token),
+                    email: findString(named: "email", in: object) ?? string(named: "email", inJWT: token)
+                )
+            }
         }
         return nil
     }
@@ -137,14 +254,24 @@ private struct LocalSubscriptionCredentialResolver: Sendable {
     }
 
     private func accountID(fromJWT token: String) -> String? {
+        guard let payload = jwtPayload(token) else { return nil }
+        if let auth = payload["https://api.openai.com/auth"] as? [String: Any],
+           let account = auth["chatgpt_account_id"] as? String { return account }
+        return payload["chatgpt_account_id"] as? String ?? payload["account_id"] as? String
+    }
+
+    private func string(named name: String, inJWT token: String) -> String? {
+        guard let payload = jwtPayload(token) else { return nil }
+        return findString(named: name, in: payload)
+    }
+
+    private func jwtPayload(_ token: String) -> [String: Any]? {
         let parts = token.split(separator: ".")
         guard parts.count == 3 else { return nil }
         var encoded = String(parts[1]).replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
         encoded += String(repeating: "=", count: (4 - encoded.count % 4) % 4)
         guard let data = Data(base64Encoded: encoded),
               let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
-        if let auth = payload["https://api.openai.com/auth"] as? [String: Any],
-           let account = auth["chatgpt_account_id"] as? String { return account }
-        return payload["chatgpt_account_id"] as? String
+        return payload
     }
 }

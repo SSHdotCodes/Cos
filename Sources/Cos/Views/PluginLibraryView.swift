@@ -13,6 +13,7 @@ struct PluginLibraryView: View {
     @State private var selection: String?
     @State private var section = LibrarySection.installed
     @State private var marketplaceQuery = ""
+    @State private var pendingPluginRemoval: InstalledPlugin?
 
     private var filteredMarketplace: [CosMarketplaceListing] {
         let query = marketplaceQuery.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
@@ -123,6 +124,23 @@ struct PluginLibraryView: View {
         .onChange(of: model.marketplacePlugins.count) { _, _ in
             if section == .marketplace, selection == nil { selection = filteredMarketplace.first?.id }
         }
+        .confirmationDialog(
+            pendingPluginRemoval.map { "Move \($0.manifest.name) to Trash?" } ?? "Uninstall plugin?",
+            isPresented: Binding(
+                get: { pendingPluginRemoval != nil },
+                set: { if !$0 { pendingPluginRemoval = nil } }
+            )
+        ) {
+            if let plugin = pendingPluginRemoval {
+                Button("Move to Trash", role: .destructive) {
+                    model.removePlugin(plugin)
+                    pendingPluginRemoval = nil
+                }
+            }
+            Button("Cancel", role: .cancel) { pendingPluginRemoval = nil }
+        } message: {
+            Text("The plugin and its bundled skills can be recovered from the Trash.")
+        }
     }
 
     private func installedRow(_ plugin: InstalledPlugin) -> some View {
@@ -132,8 +150,43 @@ struct PluginLibraryView: View {
                 .frame(width: 20)
             VStack(alignment: .leading, spacing: 2) {
                 Text(plugin.manifest.name).font(.system(size: 12.5, weight: .medium))
-                Text(plugin.manifest.author).font(.system(size: 10.5)).foregroundStyle(.secondary)
+                Text(plugin.isEnabled ? plugin.manifest.author : "Disabled")
+                    .font(.system(size: 10.5))
+                    .foregroundStyle(plugin.isEnabled ? .secondary : CosTheme.orange)
             }
+            Spacer(minLength: 5)
+            if plugin.id != "codes.ssh.cos.settings" {
+                Toggle("", isOn: Binding(
+                    get: { plugin.isEnabled },
+                    set: { model.setPlugin(plugin, enabled: $0) }
+                ))
+                .labelsHidden()
+                .toggleStyle(.switch)
+                .controlSize(.mini)
+                .help(plugin.isEnabled ? "Disable plugin" : "Enable plugin")
+            }
+            Menu {
+                if plugin.id != "codes.ssh.cos.settings" {
+                    Button(plugin.isEnabled ? "Disable" : "Enable", systemImage: plugin.isEnabled ? "pause.circle" : "play.circle") {
+                        model.setPlugin(plugin, enabled: !plugin.isEnabled)
+                    }
+                }
+                if plugin.manifest.builtIn != true {
+                    Divider()
+                    Button("Uninstall…", systemImage: "trash", role: .destructive) {
+                        pendingPluginRemoval = plugin
+                    }
+                }
+            } label: {
+                Image(systemName: "ellipsis")
+                    .font(.system(size: 10.5, weight: .semibold))
+                    .frame(width: 22, height: 22)
+            }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .disabled(plugin.id == "codes.ssh.cos.settings")
+            .help("Plugin options")
         }
     }
 
@@ -244,6 +297,7 @@ private struct PluginDetail: View {
     @EnvironmentObject private var model: AppModel
     let plugin: InstalledPlugin
     @State private var confirmRemoval = false
+    @State private var skillPendingRemoval: String?
 
     var body: some View {
         ScrollView {
@@ -309,25 +363,80 @@ private struct PluginDetail: View {
                 if !plugin.manifest.skills.isEmpty {
                     Divider()
                     Text("SKILLS").font(.system(size: 9.5, weight: .semibold)).foregroundStyle(.tertiary)
-                    FlowLayout(spacing: 7) {
+                    VStack(spacing: 0) {
                         ForEach(plugin.manifest.skills, id: \.self) { skill in
-                            Text(skill).font(.system(size: 10.5, weight: .medium)).padding(.horizontal, 8).padding(.vertical, 5).background(.primary.opacity(0.055), in: Capsule())
+                            HStack(spacing: 10) {
+                                Image(systemName: "wand.and.stars")
+                                    .font(.system(size: 11))
+                                    .foregroundStyle(model.isSkillEnabled(skill, in: plugin) ? CosTheme.blue : .secondary)
+                                    .frame(width: 18)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(skill).font(.system(size: 11.5, weight: .medium))
+                                    Text(model.isSkillEnabled(skill, in: plugin) ? "Enabled" : "Disabled")
+                                        .font(.system(size: 9.5)).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Toggle("", isOn: Binding(
+                                    get: { model.isSkillEnabled(skill, in: plugin) },
+                                    set: { model.setSkill(skill, in: plugin, enabled: $0) }
+                                ))
+                                .labelsHidden()
+                                .toggleStyle(.switch)
+                                .controlSize(.mini)
+                                Menu {
+                                    Button(model.isSkillEnabled(skill, in: plugin) ? "Disable" : "Enable", systemImage: model.isSkillEnabled(skill, in: plugin) ? "pause.circle" : "play.circle") {
+                                        model.setSkill(skill, in: plugin, enabled: !model.isSkillEnabled(skill, in: plugin))
+                                    }
+                                    if plugin.manifest.builtIn != true {
+                                        Divider()
+                                        Button("Delete…", systemImage: "trash", role: .destructive) {
+                                            skillPendingRemoval = skill
+                                        }
+                                    }
+                                } label: {
+                                    Image(systemName: "ellipsis")
+                                        .font(.system(size: 10.5, weight: .semibold))
+                                        .frame(width: 24, height: 24)
+                                }
+                                .menuStyle(.borderlessButton)
+                                .menuIndicator(.hidden)
+                                .fixedSize()
+                                .help("Skill options")
+                            }
+                            .padding(.horizontal, 10)
+                            .frame(height: 42)
+                            .overlay(alignment: .bottom) { Divider().opacity(0.35) }
                         }
                     }
+                    .background(.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
                 }
                 Spacer()
                 HStack {
                     if let homepage = plugin.manifest.homepage { Link("View on cos.ssh.codes", destination: homepage) }
                     Spacer()
-                    if plugin.manifest.builtIn != true {
+                    if plugin.id != "codes.ssh.cos.settings" {
                         Toggle("Enabled", isOn: Binding(
                             get: { plugin.isEnabled },
                             set: { model.setPlugin(plugin, enabled: $0) }
                         ))
                         .toggleStyle(.switch)
                         .controlSize(.small)
-                        Button("Remove…", role: .destructive) { confirmRemoval = true }
-                            .buttonStyle(.borderless)
+                        Menu {
+                            Button(plugin.isEnabled ? "Disable" : "Enable", systemImage: plugin.isEnabled ? "pause.circle" : "play.circle") {
+                                model.setPlugin(plugin, enabled: !plugin.isEnabled)
+                            }
+                            if plugin.manifest.builtIn != true {
+                                Divider()
+                                Button("Uninstall…", systemImage: "trash", role: .destructive) { confirmRemoval = true }
+                            }
+                        } label: {
+                            Image(systemName: "ellipsis")
+                                .font(.system(size: 11, weight: .semibold))
+                                .frame(width: 26, height: 26)
+                        }
+                        .menuStyle(.borderlessButton)
+                        .menuIndicator(.hidden)
+                        .fixedSize()
                     }
                     Text(plugin.isTrusted ? "Trusted" : "Review required")
                         .font(.caption)
@@ -343,6 +452,23 @@ private struct PluginDetail: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("The plugin can be recovered from the Trash.")
+        }
+        .confirmationDialog(
+            skillPendingRemoval.map { "Delete \($0)?" } ?? "Delete skill?",
+            isPresented: Binding(
+                get: { skillPendingRemoval != nil },
+                set: { if !$0 { skillPendingRemoval = nil } }
+            )
+        ) {
+            if let skill = skillPendingRemoval {
+                Button("Move to Trash", role: .destructive) {
+                    model.removeSkill(skill, from: plugin)
+                    skillPendingRemoval = nil
+                }
+            }
+            Button("Cancel", role: .cancel) { skillPendingRemoval = nil }
+        } message: {
+            Text("The skill can be recovered from the Trash. Its plugin will remain installed.")
         }
         .onAppear {
             if plugin.id == "codes.ssh.cos.computer-use" { model.refreshComputerUseAccess() }

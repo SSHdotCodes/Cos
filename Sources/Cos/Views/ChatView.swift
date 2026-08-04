@@ -57,6 +57,25 @@ struct ChatView: View {
             }
             .buttonStyle(.plain)
             .help("Choose workspace")
+
+            if model.isBetterWrightEnabled {
+                Button {
+                    withAnimation(.easeOut(duration: 0.16)) {
+                        model.isBrowserPanelPresented.toggle()
+                    }
+                } label: {
+                    Image(systemName: "sidebar.right")
+                        .font(.system(size: 12, weight: .medium))
+                        .frame(width: 28, height: 28)
+                        .background(
+                            model.isBrowserPanelPresented ? Color.primary.opacity(0.10) : Color.clear,
+                            in: RoundedRectangle(cornerRadius: 7, style: .continuous)
+                        )
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut("b", modifiers: [.command, .shift])
+                .help(model.isBrowserPanelPresented ? "Close Browser" : "Open Browser")
+            }
         }
         .padding(.horizontal, 16)
         .frame(height: 52)
@@ -259,6 +278,7 @@ private struct WorkTraceView: View {
         case .status: "waveform.path.ecg"
         case .reasoning: "text.bubble"
         case .tool: "wrench.and.screwdriver"
+        case .subagent: "person.2"
         }
     }
 
@@ -267,6 +287,7 @@ private struct WorkTraceView: View {
         case .status: CosTheme.blue
         case .reasoning: .secondary
         case .tool: CosTheme.orange
+        case .subagent: Color.indigo
         }
     }
 }

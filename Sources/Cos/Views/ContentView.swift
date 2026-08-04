@@ -9,11 +9,22 @@ struct ContentView: View {
                 .navigationSplitViewColumnWidth(min: 205, ideal: CosTheme.sidebarWidth, max: 300)
         } detail: {
             ChatView()
+                .inspector(isPresented: Binding(
+                    get: { model.isBrowserPanelPresented && model.isBetterWrightEnabled },
+                    set: { model.isBrowserPanelPresented = $0 }
+                )) {
+                    BetterWrightBrowserPanel(sessionID: model.selectedThreadID?.uuidString ?? "default")
+                        .environmentObject(model)
+                        .inspectorColumnWidth(min: 420, ideal: 520, max: 720)
+                }
         }
         .navigationSplitViewStyle(.balanced)
         .toolbarBackground(model.preferences.appearance == .trueDark ? Color.black : Color(nsColor: .windowBackgroundColor), for: .windowToolbar)
         .toolbarBackground(.visible, for: .windowToolbar)
         .background(model.preferences.appearance == .trueDark ? Color.black : Color(nsColor: .windowBackgroundColor))
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            model.refreshComputerUseAccess()
+        }
         .sheet(isPresented: $model.isPluginLibraryPresented) {
             PluginLibraryView()
                 .environmentObject(model)

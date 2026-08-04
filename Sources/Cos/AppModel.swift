@@ -10,6 +10,11 @@ struct PendingDirectoryTrust: Equatable {
     let prompt: String
 }
 
+struct PendingComputerUseRun: Equatable {
+    let threadID: UUID
+    let prompt: String
+}
+
 enum ExternalSkillSource: String, CaseIterable, Identifiable, Hashable {
     case codex
     case claudeCode
@@ -65,6 +70,7 @@ final class AppModel: ObservableObject {
     @Published var activity = "Ready"
     @Published var lastError: String?
     @Published var loginStatus: [String: String] = [:]
+    @Published var providerSessions: [String: ProviderSessionInfo] = [:]
     @Published var isPluginLibraryPresented = false
     @Published var pendingDirectoryTrust: PendingDirectoryTrust?
     @Published var skillImportCounts: [ExternalSkillSource: Int] = [:]
@@ -79,6 +85,8 @@ final class AppModel: ObservableObject {
     @Published var isLoadingMarketplace = false
     @Published var installingMarketplacePluginID: String?
     @Published var marketplaceError: String?
+    @Published var isBrowserPanelPresented = false
+    @Published var pendingComputerUseRun: PendingComputerUseRun?
 
     private let store = ThreadStore()
     private let runtime = AgentRuntime()
@@ -87,10 +95,16 @@ final class AppModel: ObservableObject {
     private let secureStore = SecureStore()
     private let updateService = CosUpdateService()
     private var runningTask: Task<Void, Never>?
+    private var activeRunID: UUID?
+    private var activeRunThreadID: UUID?
+    private var activeRunAssistantID: UUID?
+    private var activeRunControl: AgentRunControl?
+    private var titleTasks: [UUID: Task<Void, Never>] = [:]
     private var updateCheckTask: Task<Void, Never>?
     private var lastUpdateCheck: Date?
     private var trustedWorkspaces: Set<String>
     private var disabledPluginIDs: Set<String>
+    private var disabledSkillKeys: Set<String>
     private let builtInPluginsURL: URL?
     private static let logger = Logger(subsystem: "codes.ssh.cos", category: "app-model")
 
@@ -101,6 +115,7 @@ final class AppModel: ObservableObject {
         self.models = Self.mergeModels(Self.load([ModelProfile].self, key: "models"))
         self.trustedWorkspaces = Set(Self.load([String].self, key: "trustedWorkspaces") ?? [])
         self.disabledPluginIDs = Set(Self.load([String].self, key: "disabledPluginIDs") ?? [])
+        self.disabledSkillKeys = Set(Self.load([String].self, key: "disabledSkillKeys") ?? [])
         Task { await bootstrap() }
     }
 
@@ -123,6 +138,28 @@ final class AppModel: ObservableObject {
         providers.first { $0.id == selectedModel.providerID } ?? providers[0]
     }
 
+    var canSteerSelectedThread: Bool {
+        isRunning && selectedThreadID == activeRunThreadID
+    }
+
+    var isBetterWrightEnabled: Bool {
+        plugins.contains { $0.id == "codes.ssh.cos.betterwright" && $0.isEnabled }
+    }
+
+    var subagentRoutes: [SubagentRoute] {
+        runtime.accessibleSubagentRoutes(providers: providers, models: models)
+    }
+
+    var titleModels: [ModelProfile] {
+        let preferredIDs = ["chatgpt:gpt-5.6-luna", "xai:grok-4.5", "anthropic:claude-haiku-4.5"]
+        return preferredIDs.compactMap { id in models.first { $0.id == id } }
+    }
+
+    var selectedTitleModel: ModelProfile? {
+        let requested = preferences.titleModelID ?? "chatgpt:gpt-5.6-luna"
+        return titleModels.first { $0.id == requested } ?? titleModels.first
+    }
+
     private func bootstrap() async {
         do {
             threads = try await store.loadAll()
@@ -133,6 +170,7 @@ final class AppModel: ObservableObject {
         if threads.isEmpty { newThread() } else { selectedThreadID = threads.first?.id }
         await reloadPlugins()
         refreshSkillImportCounts()
+        refreshProviderSessions()
         await checkForUpdates()
         schedulePeriodicUpdateChecks()
     }
@@ -241,6 +279,7 @@ final class AppModel: ObservableObject {
 
     func deleteThread(_ id: UUID) {
         guard !isRunning || selectedThreadID != id else { return }
+        titleTasks.removeValue(forKey: id)?.cancel()
         threads.removeAll { $0.id == id }
         if selectedThreadID == id { selectedThreadID = threads.first?.id }
         Task { try? await store.delete(id: id) }
@@ -298,6 +337,22 @@ final class AppModel: ObservableObject {
         startRun(rawPrompt, appendUserMessage: true)
     }
 
+    func steer(_ rawPrompt: String) {
+        let prompt = rawPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !prompt.isEmpty,
+              isRunning,
+              let activeRunThreadID,
+              selectedThreadID == activeRunThreadID,
+              let control = activeRunControl else { return }
+        activity = "Applying steering…"
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            if !(await control.submit(prompt)), activeRunThreadID == self.activeRunThreadID {
+                activity = "Steering queue is full"
+            }
+        }
+    }
+
     private func startRun(_ rawPrompt: String, appendUserMessage: Bool) {
         let prompt = rawPrompt.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !prompt.isEmpty, !isRunning, let index = selectedThreadBindingIndex else { return }
@@ -306,7 +361,8 @@ final class AppModel: ObservableObject {
         if appendUserMessage {
             threads[index].messages.append(.init(role: .user, content: prompt))
             if threads[index].messages.count == 1 {
-                threads[index].title = String(prompt.prefix(54))
+                threads[index].title = "New task"
+                scheduleTitleGeneration(threadID: threads[index].id, prompt: prompt)
             }
             if handleSlashCommand(prompt, threadIndex: index) {
                 threads[index].updatedAt = Date()
@@ -314,10 +370,31 @@ final class AppModel: ObservableObject {
                 return
             }
         }
+        let computerUseEnabled = plugins.contains { $0.id == "codes.ssh.cos.computer-use" && $0.isEnabled }
+        computerUseAccessGranted = CosComputerUseAccess.isGranted
+        if computerUseEnabled,
+           Self.looksLikeComputerUseRequest(prompt),
+           !computerUseAccessGranted {
+            pendingComputerUseRun = .init(threadID: threads[index].id, prompt: prompt)
+            threads[index].messages.append(.init(
+                role: .assistant,
+                content: "Cos needs macOS Accessibility access for this task. I’ll continue automatically as soon as the permission becomes active."
+            ))
+            threads[index].updatedAt = Date()
+            persist(threads[index])
+            requestComputerUseAccess()
+            return
+        }
         let assistantID = UUID()
+        let runID = UUID()
+        let runControl = AgentRunControl()
         threads[index].messages.append(.init(id: assistantID, role: .assistant, content: "", isStreaming: true))
         threads[index].updatedAt = Date()
         isRunning = true
+        activeRunID = runID
+        activeRunThreadID = threads[index].id
+        activeRunAssistantID = assistantID
+        activeRunControl = runControl
         activity = "Preparing context…"
         lastError = nil
 
@@ -336,10 +413,20 @@ final class AppModel: ObservableObject {
         let goalContext = threads[index].goal.map {
             "Active goal: \($0.objective)\nGoal status: \($0.status.rawValue)\nTokens used: \($0.usedTokens)\n"
         } ?? ""
+        let referencePlugins = plugins.map { plugin in
+            var visible = plugin
+            visible.manifest.skills = plugin.manifest.skills.filter { isSkillEnabled($0, in: plugin) }
+            return visible
+        }
+        let referenceContext = ComposerReferenceResolver.referenceContext(in: prompt, plugins: referencePlugins)
+        let subagentsAuthorized = SubagentAuthorization.isExplicitlyRequested(in: prompt)
+        let availableSubagentRoutes = subagentRoutes
+        let browserEnabled = isBetterWrightEnabled
         let effectivePrompt = """
         \(CosSettingsPlugin.systemPrompt)
 
         \(goalContext)
+        \(referenceContext)
         Conversation context:
         \(compaction.promptContext)
 
@@ -355,21 +442,37 @@ final class AppModel: ObservableObject {
             fastMode: preferences.fastMode,
             fullAccess: preferences.fullAccess,
             workspaceIsTrusted: isWorkspaceTrusted(threads[index].workspacePath),
-            extensionInstructions: activeExtensionInstructions()
+            extensionInstructions: activeExtensionInstructions(),
+            computerUseEnabled: computerUseEnabled,
+            browserEnabled: browserEnabled,
+            availableSubagentRoutes: availableSubagentRoutes,
+            subagentsAuthorized: subagentsAuthorized,
+            runControl: runControl
         )
         persist(threads[index])
 
         runningTask = Task { [weak self] in
             guard let self else { return }
+            var currentAssistantID = assistantID
             do {
                 let stream = try runtime.stream(request: request)
                 for try await event in stream {
-                    if Task.isCancelled { break }
-                    handle(event, assistantID: assistantID, threadID: request.thread.id)
+                    guard !Task.isCancelled, activeRunID == runID else { return }
+                    if case .steeringApplied(let messages) = event {
+                        currentAssistantID = applySteering(
+                            messages,
+                            assistantID: currentAssistantID,
+                            threadID: request.thread.id
+                        )
+                    } else {
+                        handle(event, assistantID: currentAssistantID, threadID: request.thread.id)
+                    }
                 }
-                finishAssistant(id: assistantID, threadID: request.thread.id)
+                guard activeRunID == runID else { return }
+                finishAssistant(id: currentAssistantID, threadID: request.thread.id)
             } catch {
-                failAssistant(id: assistantID, threadID: request.thread.id, retryPrompt: prompt, error: error)
+                guard activeRunID == runID else { return }
+                failAssistant(id: currentAssistantID, threadID: request.thread.id, retryPrompt: prompt, error: error)
             }
         }
     }
@@ -397,12 +500,20 @@ final class AppModel: ObservableObject {
     }
 
     func cancel() {
+        let runningThreadID = activeRunThreadID
+        let runningAssistantID = activeRunAssistantID
+        activeRunID = nil
+        activeRunThreadID = nil
+        activeRunAssistantID = nil
+        activeRunControl = nil
         runningTask?.cancel()
         runningTask = nil
         isRunning = false
         activity = "Stopped"
-        guard let threadIndex = selectedThreadBindingIndex,
-              let messageIndex = threads[threadIndex].messages.lastIndex(where: { $0.isStreaming }) else { return }
+        guard let runningThreadID,
+              let threadIndex = threads.firstIndex(where: { $0.id == runningThreadID }),
+              let runningAssistantID,
+              let messageIndex = threads[threadIndex].messages.firstIndex(where: { $0.id == runningAssistantID }) else { return }
         threads[threadIndex].messages[messageIndex].isStreaming = false
         persist(threads[threadIndex])
     }
@@ -467,6 +578,11 @@ final class AppModel: ObservableObject {
         case .tool(let name, let detail):
             activity = detail.isEmpty ? "Using \(name)…" : "\(name): \(detail)"
             appendWork(.init(kind: .tool, title: name.replacingOccurrences(of: "_", with: " ").capitalized, detail: detail), assistantID: assistantID, threadIndex: threadIndex, coalesce: false)
+        case .subagent(let name, let detail):
+            activity = "\(name): \(detail)"
+            upsertSubagentWork(name: name, detail: detail, assistantID: assistantID, threadIndex: threadIndex)
+        case .steeringApplied:
+            break
         case .usage(let input, let output):
             if var goal = threads[threadIndex].goal {
                 goal.usedTokens += input + output
@@ -498,6 +614,52 @@ final class AppModel: ObservableObject {
         threads[threadIndex].messages[messageIndex].workItems = items
     }
 
+    private func upsertSubagentWork(name: String, detail: String, assistantID: UUID, threadIndex: Int) {
+        guard let messageIndex = threads[threadIndex].messages.firstIndex(where: { $0.id == assistantID }) else { return }
+        var items = threads[threadIndex].messages[messageIndex].workItems ?? []
+        if let last = items.indices.last, items[last].kind == .subagent, items[last].title == name {
+            items[last].detail = detail
+        } else if items.count < 120 {
+            items.append(.init(kind: .subagent, title: name, detail: detail))
+        }
+        threads[threadIndex].messages[messageIndex].workItems = items
+    }
+
+    private func applySteering(
+        _ messages: [SteeringMessage],
+        assistantID: UUID,
+        threadID: UUID
+    ) -> UUID {
+        guard !messages.isEmpty,
+              let threadIndex = threads.firstIndex(where: { $0.id == threadID }),
+              let messageIndex = threads[threadIndex].messages.firstIndex(where: { $0.id == assistantID }) else {
+            return assistantID
+        }
+        let detail = messages.map(\.content).joined(separator: "\n")
+        threads[threadIndex].messages[messageIndex].isStreaming = false
+        appendWork(
+            .init(kind: .status, title: "Steered", detail: detail),
+            assistantID: assistantID,
+            threadIndex: threadIndex,
+            coalesce: false
+        )
+        for message in messages {
+            threads[threadIndex].messages.append(.init(role: .user, content: message.content))
+        }
+        let nextAssistantID = UUID()
+        threads[threadIndex].messages.append(.init(
+            id: nextAssistantID,
+            role: .assistant,
+            content: "",
+            isStreaming: true
+        ))
+        threads[threadIndex].updatedAt = Date()
+        activeRunAssistantID = nextAssistantID
+        activity = "Steering applied"
+        persist(threads[threadIndex])
+        return nextAssistantID
+    }
+
     private func finishAssistant(id: UUID, threadID: UUID) {
         guard let threadIndex = threads.firstIndex(where: { $0.id == threadID }),
               let messageIndex = threads[threadIndex].messages.firstIndex(where: { $0.id == id }) else { return }
@@ -507,6 +669,10 @@ final class AppModel: ObservableObject {
         if let mutation = extracted.mutation { apply(mutation) }
         if let action = extracted.managementAction { apply(action) }
         threads[threadIndex].updatedAt = Date()
+        activeRunID = nil
+        activeRunThreadID = nil
+        activeRunAssistantID = nil
+        activeRunControl = nil
         isRunning = false
         runningTask = nil
         activity = "Ready"
@@ -520,6 +686,10 @@ final class AppModel: ObservableObject {
            case .directoryTrustRequired(let workspacePath) = runtimeError {
             threads[threadIndex].messages.remove(at: messageIndex)
             threads[threadIndex].updatedAt = Date()
+            activeRunID = nil
+            activeRunThreadID = nil
+            activeRunAssistantID = nil
+            activeRunControl = nil
             isRunning = false
             runningTask = nil
             activity = "Waiting for directory trust"
@@ -532,6 +702,10 @@ final class AppModel: ObservableObject {
             threads[threadIndex].messages[messageIndex].content = "I couldn’t start this run. \(error.localizedDescription)"
         }
         threads[threadIndex].messages[messageIndex].isStreaming = false
+        activeRunID = nil
+        activeRunThreadID = nil
+        activeRunAssistantID = nil
+        activeRunControl = nil
         isRunning = false
         runningTask = nil
         activity = "Needs attention"
@@ -646,6 +820,8 @@ final class AppModel: ObservableObject {
         var manifest = try JSONDecoder().decode(CosPluginManifest.self, from: Data(contentsOf: manifestURL))
         manifest.skills.removeAll { $0 == id }
         try writeManagedManifest(manifest, to: manifestURL)
+        disabledSkillKeys.remove(skillKey(id, pluginID: ownerID))
+        persistDisabledSkills()
     }
 
     private func createManagedPlugin(id: String, name: String, description: String, instructions: String?) throws {
@@ -682,7 +858,9 @@ final class AppModel: ObservableObject {
         guard FileManager.default.fileExists(atPath: root.path) else { throw ManagedArtifactError.pluginNotFound(id) }
         try FileManager.default.trashItem(at: root, resultingItemURL: nil)
         disabledPluginIDs.remove(id)
+        disabledSkillKeys = Set(disabledSkillKeys.filter { !$0.hasPrefix(id + ":") })
         persistDisabledPlugins()
+        persistDisabledSkills()
     }
 
     private func setPlugin(id: String, enabled: Bool) throws {
@@ -696,6 +874,8 @@ final class AppModel: ObservableObject {
         do {
             try setPlugin(id: plugin.id, enabled: enabled)
             if enabled, plugin.id == "codes.ssh.cos.computer-use" { requestComputerUseAccess() }
+            if !enabled, plugin.id == "codes.ssh.cos.computer-use" { pendingComputerUseRun = nil }
+            if !enabled, plugin.id == "codes.ssh.cos.betterwright" { isBrowserPanelPresented = false }
             Task { await reloadPlugins() }
         } catch {
             lastError = error.localizedDescription
@@ -704,7 +884,51 @@ final class AppModel: ObservableObject {
 
     func removePlugin(_ plugin: InstalledPlugin) {
         do {
-            try removeManagedPlugin(id: plugin.id)
+            guard plugin.manifest.builtIn != true else { throw ManagedArtifactError.builtInProtected }
+            try FileManager.default.trashItem(at: plugin.location, resultingItemURL: nil)
+            disabledPluginIDs.remove(plugin.id)
+            disabledSkillKeys = Set(disabledSkillKeys.filter { !$0.hasPrefix(plugin.id + ":") })
+            persistDisabledPlugins()
+            persistDisabledSkills()
+            activity = "Plugin moved to Trash"
+            Task { await reloadPlugins() }
+        } catch {
+            lastError = error.localizedDescription
+        }
+    }
+
+    func isSkillEnabled(_ skill: String, in plugin: InstalledPlugin) -> Bool {
+        !disabledSkillKeys.contains(skillKey(skill, pluginID: plugin.id))
+    }
+
+    func setSkill(_ skill: String, in plugin: InstalledPlugin, enabled: Bool) {
+        let key = skillKey(skill, pluginID: plugin.id)
+        if enabled { disabledSkillKeys.remove(key) } else { disabledSkillKeys.insert(key) }
+        persistDisabledSkills()
+        activity = enabled ? "Skill enabled" : "Skill disabled"
+        objectWillChange.send()
+    }
+
+    func removeSkill(_ skill: String, from plugin: InstalledPlugin) {
+        do {
+            guard plugin.manifest.builtIn != true else { throw ManagedArtifactError.builtInProtected }
+            try validateManagedID(skill)
+            let manifestURL = plugin.location.appendingPathComponent("cos.plugin.json")
+            var manifest = try JSONDecoder().decode(CosPluginManifest.self, from: Data(contentsOf: manifestURL))
+            guard manifest.skills.contains(skill) else { throw ManagedArtifactError.skillNotFound(skill) }
+            let candidates = [
+                plugin.location.appendingPathComponent("skills/\(skill)", isDirectory: true),
+                plugin.location.appendingPathComponent(skill, isDirectory: true),
+            ]
+            guard let skillRoot = candidates.first(where: { FileManager.default.fileExists(atPath: $0.path) }) else {
+                throw ManagedArtifactError.skillNotFound(skill)
+            }
+            try FileManager.default.trashItem(at: skillRoot, resultingItemURL: nil)
+            manifest.skills.removeAll { $0 == skill }
+            try writeManagedManifest(manifest, to: manifestURL)
+            disabledSkillKeys.remove(skillKey(skill, pluginID: plugin.id))
+            persistDisabledSkills()
+            activity = "Skill moved to Trash"
             Task { await reloadPlugins() }
         } catch {
             lastError = error.localizedDescription
@@ -733,12 +957,92 @@ final class AppModel: ObservableObject {
         Self.save(Array(disabledPluginIDs).sorted(), key: "disabledPluginIDs")
     }
 
+    private func persistDisabledSkills() {
+        Self.save(Array(disabledSkillKeys).sorted(), key: "disabledSkillKeys")
+    }
+
+    private func skillKey(_ skill: String, pluginID: String) -> String {
+        pluginID + ":" + skill
+    }
+
     func persistPreferences() {
         Self.save(preferences, key: "preferences")
     }
 
     private func normalizedWorkspacePath(_ path: String) -> String {
         URL(fileURLWithPath: path, isDirectory: true).standardizedFileURL.resolvingSymlinksInPath().path
+    }
+
+    private nonisolated static func looksLikeComputerUseRequest(_ prompt: String) -> Bool {
+        let value = prompt.lowercased()
+        if value.contains("@computer") || value.contains("computer use") { return true }
+        if value.contains("@betterwright") || value.contains("/browser") { return false }
+        let actions = ["open ", "click ", "type ", "send ", "log in", "login", "navigate ", "go to "]
+        let destinations = [" app", "safari", "chrome", "chat "]
+        return actions.contains(where: value.contains) && destinations.contains(where: value.contains)
+    }
+
+    private func scheduleTitleGeneration(threadID: UUID, prompt: String) {
+        guard let model = selectedTitleModel,
+              let provider = providers.first(where: { $0.id == model.providerID }) else { return }
+        titleTasks.removeValue(forKey: threadID)?.cancel()
+        let workspace = threads.first(where: { $0.id == threadID })?.workspacePath ?? preferences.defaultWorkspace
+        let titlePrompt = """
+        Write a specific 3–7 word task title for this user request. Use plain title case text only: no quotes, no markdown, no period, and no prefix such as “Title:”.
+
+        User request:
+        \(String(prompt.prefix(2_000)))
+        """
+        let titleThread = CosThread(id: threadID, workspacePath: workspace, modelID: model.id, effort: .low)
+        let request = AgentRequest(
+            prompt: titlePrompt,
+            latestUserRequest: titlePrompt,
+            thread: titleThread,
+            model: model,
+            provider: provider,
+            effort: .low,
+            fastMode: false,
+            fullAccess: false,
+            workspaceIsTrusted: true,
+            toolsEnabled: false
+        )
+
+        titleTasks[threadID] = Task { [weak self] in
+            guard let self else { return }
+            do {
+                var output = ""
+                let stream = try runtime.stream(request: request)
+                for try await event in stream {
+                    guard !Task.isCancelled else { return }
+                    if case .textDelta(let text) = event { output += text }
+                }
+                guard let title = Self.cleanGeneratedTitle(output),
+                      let index = threads.firstIndex(where: { $0.id == threadID }) else { return }
+                threads[index].title = title
+                threads[index].updatedAt = Date()
+                persist(threads[index])
+            } catch {
+                guard let index = threads.firstIndex(where: { $0.id == threadID }), threads[index].title == "New task" else { return }
+                threads[index].title = Self.fallbackTitle(for: prompt)
+                persist(threads[index])
+            }
+            titleTasks.removeValue(forKey: threadID)
+        }
+    }
+
+    private nonisolated static func cleanGeneratedTitle(_ raw: String) -> String? {
+        var title = raw.components(separatedBy: .newlines).first?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        title = title.replacingOccurrences(of: "(?i)^title\\s*:\\s*", with: "", options: .regularExpression)
+        title = title.trimmingCharacters(in: CharacterSet(charactersIn: "\"'`*_#–—-. "))
+        title = title.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+        guard title.count >= 3 else { return nil }
+        return String(title.prefix(54)).trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private nonisolated static func fallbackTitle(for prompt: String) -> String {
+        let oneLine = prompt.replacingOccurrences(of: "\\s+", with: " ", options: .regularExpression)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return String(oneLine.prefix(54))
     }
 
     private func normalizeLoadedThreadEfforts() {
@@ -761,7 +1065,7 @@ final class AppModel: ObservableObject {
         for plugin in plugins where plugin.isEnabled {
             let capabilitySummary = plugin.manifest.capabilities.map { "\($0.id): \($0.description)" }.joined(separator: "\n")
             sections.append("Plugin \(plugin.manifest.id) — \(plugin.manifest.description)\n\(capabilitySummary)")
-            for skill in plugin.manifest.skills where remaining > 0 {
+            for skill in plugin.manifest.skills where remaining > 0 && isSkillEnabled(skill, in: plugin) {
                 let candidates = [
                     plugin.location.appendingPathComponent("skills/\(skill)/SKILL.md"),
                     plugin.location.appendingPathComponent("\(skill)/SKILL.md"),
@@ -830,8 +1134,31 @@ final class AppModel: ObservableObject {
             loginStatus[provider.id] = provider.id == "xai"
                 ? "Continue the SuperGrok / X Premium sign-in in Terminal"
                 : "Continue sign-in in Terminal"
+            monitorProviderSignIn(provider)
         } catch {
             loginStatus[provider.id] = "Could not open Terminal: \(error.localizedDescription)"
+        }
+    }
+
+    func refreshProviderSessions() {
+        var sessions: [String: ProviderSessionInfo] = [:]
+        for provider in providers where provider.authMode == .subscription {
+            if let session = runtime.sessionInfo(for: provider) { sessions[provider.id] = session }
+        }
+        providerSessions = sessions
+    }
+
+    private func monitorProviderSignIn(_ provider: ProviderProfile) {
+        Task { [weak self] in
+            for _ in 0..<90 {
+                try? await Task.sleep(for: .seconds(2))
+                guard let self else { return }
+                self.refreshProviderSessions()
+                if let session = self.providerSessions[provider.id] {
+                    self.loginStatus[provider.id] = "Signed in as \(session.displayName)"
+                    return
+                }
+            }
         }
     }
 
@@ -846,8 +1173,8 @@ final class AppModel: ObservableObject {
     func reloadPlugins() async {
         let workspace = selectedThread.map { URL(fileURLWithPath: $0.workspacePath, isDirectory: true) }
         var discovered = await registry.discover(builtInURL: builtInPluginsURL, workspace: workspace)
-        for index in discovered.indices where discovered[index].manifest.builtIn != true {
-            discovered[index].isEnabled = !disabledPluginIDs.contains(discovered[index].id)
+        for index in discovered.indices {
+            discovered[index].isEnabled = discovered[index].id == "codes.ssh.cos.settings" || !disabledPluginIDs.contains(discovered[index].id)
         }
         plugins = discovered
         refreshComputerUseAccess()
@@ -928,7 +1255,10 @@ final class AppModel: ObservableObject {
 
     func refreshComputerUseAccess() {
         computerUseAccessGranted = CosComputerUseAccess.isGranted
-        if computerUseAccessGranted { computerUseAccessStatus = "Accessibility access granted" }
+        if computerUseAccessGranted {
+            computerUseAccessStatus = "Accessibility access granted"
+            resumePendingComputerUseRun()
+        }
     }
 
     func requestComputerUseAccess() {
@@ -951,6 +1281,15 @@ final class AppModel: ObservableObject {
     func openAccessibilitySettings() {
         guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") else { return }
         NSWorkspace.shared.open(url)
+    }
+
+    private func resumePendingComputerUseRun() {
+        guard computerUseAccessGranted,
+              !isRunning,
+              let pendingComputerUseRun,
+              selectedThreadID == pendingComputerUseRun.threadID else { return }
+        self.pendingComputerUseRun = nil
+        startRun(pendingComputerUseRun.prompt, appendUserMessage: false)
     }
 
     func installPluginFromDisk() {

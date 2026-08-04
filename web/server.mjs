@@ -94,7 +94,7 @@ function validSubmission(input) {
 
 async function handleAPI(request, response, url) {
   if (request.method === "GET" && url.pathname === "/api/health") {
-    return json(response, 200, { ok: true, service: "cos-marketplace", version: "1.0.0" });
+    return json(response, 200, { ok: true, service: "cos-marketplace", version: "1.0.1" });
   }
   if (request.method === "GET" && url.pathname === "/api/update") {
     const update = JSON.parse(await readFile(updatePath, "utf8"));

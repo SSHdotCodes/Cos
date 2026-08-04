@@ -24,16 +24,19 @@
 
 ![Cos native macOS workspace](docs/images/cos-workspace.png)
 
-Cos keeps the entire agent loop in one lightweight Swift runtime: provider streaming, goals, compaction, tools, plugins, skills, credentials, and task history. It does not keep a browser runtime alive or hand the task to a second coding-agent harness.
+Cos keeps the entire coding-agent loop in one lightweight Swift runtime: provider streaming, goals, compaction, tools, plugins, skills, credentials, and task history. BetterWright starts only for live web work, while every model and subagent stays inside the Cos harness.
 
 ## Why Cos
 
 - **Native and lean.** SwiftUI, direct provider transports, macOS Keychain, bounded work traces, and no Electron runtime.
 - **One harness for every model.** ChatGPT, Anthropic, xAI, Qwen, OpenCode Go, Pi, and custom OpenAI-compatible endpoints use the same Cos tool loop.
 - **Long-running tasks that stay coherent.** Persistent `/goal` state and compacted checkpoints preserve intent while controlling context growth.
+- **Steer without starting over.** Type new direction while a run is active and Cos immediately continues from the updated conversation.
+- **Native subagents.** Explicitly delegate bounded work to any connected model at one of that model’s supported reasoning efforts; every child still runs through the Cos harness.
 - **Model-aware controls.** Each model exposes only the reasoning levels and Fast Mode capability it supports.
 - **A real extension system.** Import portable Codex and Claude Code skills, install from the in-app marketplace, or create capability-scoped Cos plugins.
 - **Computer Use built in.** Accessibility-first Mac control follows explicit user intent without redundant stops while retaining safety boundaries for consequential actions.
+- **A browser you can watch and control.** BetterWright powers persistent agentic browsing, while a local interactive pane shows the exact task session without keeping Chromium alive at idle.
 - **Local credentials.** BYOK values are device-only Keychain items; subscription helpers use provider-owned local sessions.
 
 ## Interface
@@ -46,9 +49,9 @@ The interface includes System, Light, Dark, and True Dark themes, an expandable 
 
 ## Install
 
-Cos 1.0 supports Apple silicon Macs running macOS 15 or later.
+Cos 1.0.1 supports Apple silicon Macs running macOS 15 or later.
 
-1. Download the [Cos 1.0 DMG](https://github.com/SSHDotCodes/Cos/releases/download/v1.0.0/Cos-1.0.0.dmg) or [ZIP](https://github.com/SSHDotCodes/Cos/releases/download/v1.0.0/Cos-1.0.0-macOS-arm64.zip).
+1. Download the [Cos 1.0.1 DMG](https://github.com/SSHDotCodes/Cos/releases/download/v1.0.1/Cos-1.0.1.dmg) or [ZIP](https://github.com/SSHDotCodes/Cos/releases/download/v1.0.1/Cos-1.0.1-macOS-arm64.zip).
 2. Move `Cos.app` to Applications.
 3. Open Cos and configure a provider in **Settings → Providers**.
 
@@ -65,6 +68,16 @@ The 1.0 community build is ad-hoc signed, not Apple-notarized. On first launch, 
 ```
 
 Goals persist with the task and remain part of compacted agent context.
+
+## Steering and subagents
+
+While Cos is working, type a correction or added instruction and press Command–Return (or the send arrow) to steer the active task. Cos interrupts the current provider turn, preserves its work trace, and continues inside the same harness run with steering applied in order.
+
+## Agentic browser
+
+Enable the built-in BetterWright Browser plugin and click the Browser button in the task header (or press Shift–Command–B). Cos uses a persistent task-specific BetterWright session for `browser_run` tools and attaches the right-side pane to that same session. The viewer binds only to loopback; you can take control, switch tabs, or close the active tab from Cos. The managed browser is a one-time, on-demand download and is not resident when unused.
+
+Use `/subagent` or choose **+ → Ask a subagent** to prefill an exact model and reasoning effort. Cos only offers locally connected providers, validates the model-specific effort allowlist, runs one child at a time, and returns child tools and status inside the parent work trace.
 
 ## Providers and credentials
 
@@ -83,7 +96,7 @@ BYOK values are stored as generic-password items under the `codes.ssh.cos` Keych
 
 ## Build from source
 
-Requirements: macOS 15+, Xcode/Swift 6.2 or later, and Node 20+ for the marketplace tests.
+Requirements: macOS 15+, Xcode/Swift 6.2 or later, and Node 20+ for the marketplace tests. Release packaging downloads a pinned portable Node 24.16.0 runtime and BetterWright 1.6.3; development builds can use a compatible global BetterWright installation.
 
 ```sh
 git clone https://github.com/SSHDotCodes/Cos.git
@@ -122,4 +135,4 @@ Issues and focused pull requests are welcome. Please read [CONTRIBUTING.md](CONT
 
 ## License
 
-Cos is available under the [MIT License](LICENSE).
+Cos is available under the [MIT License](LICENSE). Bundled third-party notices are in [THIRD_PARTY_LICENSES](THIRD_PARTY_LICENSES).

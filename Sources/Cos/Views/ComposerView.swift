@@ -8,6 +8,9 @@ struct ComposerView: View {
     @State private var text = ""
     @State private var modelPopover = false
     @State private var editorFocused = false
+    @State private var selectionUTF16Offset = 0
+    @State private var selectedSuggestionIndex = 0
+    @State private var dismissedSuggestionSignature: String?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -45,14 +48,23 @@ struct ComposerView: View {
 
             ZStack(alignment: .topLeading) {
                 if text.isEmpty {
-                    Text("Ask Cos to build, inspect, fix, or run anything…")
+                    Text(composerPlaceholder)
                         .font(.system(size: 13))
                         .foregroundStyle(.tertiary)
                         .padding(.horizontal, 14)
                         .padding(.top, 9)
                         .allowsHitTesting(false)
                 }
-                AgentTextEditor(text: $text, isFocused: $editorFocused, onSubmit: submit)
+                AgentTextEditor(
+                    text: $text,
+                    isFocused: $editorFocused,
+                    selectionUTF16Offset: $selectionUTF16Offset,
+                    suggestionsVisible: !referenceSuggestions.isEmpty,
+                    onMoveSuggestion: moveSuggestion,
+                    onAcceptSuggestion: acceptSelectedSuggestion,
+                    onDismissSuggestions: dismissSuggestions,
+                    onSubmit: submit
+                )
                     .padding(.horizontal, 9)
                     .frame(height: editorHeight)
             }
@@ -61,6 +73,21 @@ struct ComposerView: View {
                 Menu {
                     Button("Choose workspace…", systemImage: "folder") { model.chooseWorkspace() }
                     Button("New task", systemImage: "plus.bubble") { model.newThread() }
+                    Menu("Ask a subagent", systemImage: "person.2") {
+                        if model.subagentRoutes.isEmpty {
+                            Text("Connect a model provider in Settings")
+                        } else {
+                            ForEach(model.subagentRoutes) { route in
+                                Menu(route.model.name) {
+                                    ForEach(route.model.effortOptions) { effort in
+                                        Button(effort.title) {
+                                            prepareSubagentPrompt(route: route, effort: effort)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
                     Divider()
                     Button("Plugin library…", systemImage: "shippingbox") { model.isPluginLibraryPresented = true }
                 } label: {
@@ -86,19 +113,20 @@ struct ComposerView: View {
                 Spacer(minLength: 4)
 
                 Button { modelPopover.toggle() } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "bolt.fill")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(CosTheme.blue)
-                            .frame(width: 10)
-                            .opacity(model.selectedModel.supportsFastMode && model.preferences.fastMode ? 1 : 0)
+                    HStack(spacing: 6) {
+                        if model.selectedModel.supportsFastMode && model.preferences.fastMode {
+                            Image(systemName: "bolt.fill")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundStyle(CosTheme.blue)
+                        }
                         Text(model.selectedModel.name)
                             .lineLimit(1)
-                            .frame(width: 64, alignment: .trailing)
+                            .layoutPriority(1)
+                        ProviderMark(providerID: model.selectedModel.providerID, size: 13)
+                        Spacer(minLength: 0)
                         Text(model.selectedThread?.effort.shortTitle ?? model.preferences.defaultEffort.shortTitle)
                             .foregroundStyle(.secondary)
                             .lineLimit(1)
-                            .frame(width: 58, alignment: .trailing)
                         Image(systemName: "chevron.down")
                             .font(.system(size: 8, weight: .semibold))
                             .foregroundStyle(.secondary)
@@ -106,7 +134,7 @@ struct ComposerView: View {
                     .font(.system(size: 11.5, weight: .medium))
                     .padding(.horizontal, 9)
                     .frame(height: 28)
-                    .frame(width: 176)
+                    .frame(width: 194)
                     .background(.primary.opacity(0.055), in: Capsule())
                 }
                 .buttonStyle(.plain)
@@ -123,23 +151,92 @@ struct ComposerView: View {
                 .buttonStyle(.plain)
                 .help("Use macOS Dictation")
 
-                Button { model.isRunning ? model.cancel() : submit() } label: {
-                    Image(systemName: model.isRunning ? "stop.fill" : "arrow.up")
+                Button { primaryAction() } label: {
+                    Image(systemName: showsStopAction ? "stop.fill" : "arrow.up")
                         .font(.system(size: 12, weight: .bold))
-                        .foregroundStyle(model.isRunning || !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? Color(nsColor: .windowBackgroundColor) : .secondary)
+                        .foregroundStyle(model.isRunning || !trimmedText.isEmpty ? Color(nsColor: .windowBackgroundColor) : .secondary)
                         .frame(width: 29, height: 29)
-                        .background(model.isRunning || !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? AnyShapeStyle(.primary) : AnyShapeStyle(.primary.opacity(0.11)), in: Circle())
+                        .background(model.isRunning || !trimmedText.isEmpty ? AnyShapeStyle(.primary) : AnyShapeStyle(.primary.opacity(0.11)), in: Circle())
                 }
                 .buttonStyle(.plain)
                 .keyboardShortcut(.return, modifiers: .command)
+                .help(showsStopAction ? "Stop active run" : model.isRunning ? "Steer active run" : "Send")
             }
             .padding(.horizontal, 8)
             .padding(.bottom, 7)
         }
         .glassCard(cornerRadius: CosTheme.composerRadius, trueDark: model.preferences.appearance == .trueDark)
+        .overlay(alignment: .topLeading) {
+            if !referenceSuggestions.isEmpty {
+                referenceSuggestionMenu
+                    .padding(.horizontal, 10)
+                    .offset(y: -referenceSuggestionMenuHeight - 8)
+                    .transition(.opacity.combined(with: .scale(scale: 0.985, anchor: .bottomLeading)))
+                    .zIndex(20)
+            }
+        }
         .animation(reduceMotion ? nil : .easeOut(duration: 0.14), value: model.preferences.fastMode)
+        .animation(reduceMotion ? nil : .easeOut(duration: 0.11), value: referenceQuery?.signature)
+        .onChange(of: referenceQuery?.signature) { _, _ in
+            selectedSuggestionIndex = 0
+        }
         .frame(maxWidth: 820)
         .frame(maxWidth: .infinity)
+        .zIndex(10)
+    }
+
+    private var referenceQuery: ComposerReferenceQuery? {
+        ComposerReferenceResolver.query(in: text, selectionUTF16Offset: selectionUTF16Offset)
+    }
+
+    private var referenceSuggestions: [ComposerReferenceSuggestion] {
+        guard let query = referenceQuery, query.signature != dismissedSuggestionSignature else { return [] }
+        let plugins = model.plugins.map { plugin in
+            var visible = plugin
+            visible.manifest.skills = plugin.manifest.skills.filter { model.isSkillEnabled($0, in: plugin) }
+            return visible
+        }
+        return ComposerReferenceResolver.suggestions(for: query, plugins: plugins)
+    }
+
+    private var referenceSuggestionMenuHeight: CGFloat {
+        CGFloat(referenceSuggestions.count) * 40 + 12
+    }
+
+    private var referenceSuggestionMenu: some View {
+        VStack(spacing: 2) {
+            ForEach(Array(referenceSuggestions.enumerated()), id: \.element.id) { index, suggestion in
+                Button { acceptSuggestion(at: index) } label: {
+                    HStack(spacing: 9) {
+                        Image(systemName: suggestion.kind == .plugin ? "shippingbox" : suggestion.kind == .skill ? "wand.and.stars" : "chevron.forward")
+                            .font(.system(size: 10.5, weight: .semibold))
+                            .foregroundStyle(index == selectedSuggestionIndex ? CosTheme.blue : .secondary)
+                            .frame(width: 16)
+                        Text(suggestion.title)
+                            .font(.system(size: 12, weight: .semibold))
+                            .lineLimit(1)
+                        Text(suggestion.detail)
+                            .font(.system(size: 10.5))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                        Spacer(minLength: 8)
+                        Text(suggestion.kind.title.uppercased())
+                            .font(.system(size: 8, weight: .bold))
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal, 10)
+                    .frame(height: 38)
+                    .background(index == selectedSuggestionIndex ? CosTheme.blue.opacity(0.12) : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(6)
+        .frame(maxWidth: 520)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).stroke(.primary.opacity(0.1), lineWidth: 0.5))
+        .shadow(color: .black.opacity(0.22), radius: 18, y: 8)
     }
 
     private var editorHeight: CGFloat {
@@ -148,17 +245,82 @@ struct ComposerView: View {
         return min(132, max(46, CGFloat(explicitLines + wrappedLines) * 18 + 28))
     }
 
+    private var trimmedText: String {
+        text.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private var composerPlaceholder: String {
+        if model.canSteerSelectedThread { return "Steer the active run…" }
+        if model.isRunning { return "Another task is running…" }
+        return "Ask Cos to build, inspect, fix, or run anything…"
+    }
+
+    private var showsStopAction: Bool {
+        model.isRunning && (trimmedText.isEmpty || !model.canSteerSelectedThread)
+    }
+
+    private func primaryAction() {
+        if showsStopAction {
+            model.cancel()
+        } else {
+            submit()
+        }
+    }
+
     private func submit() {
-        let prompt = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !prompt.isEmpty, !model.isRunning else { return }
+        let prompt = trimmedText
+        guard !prompt.isEmpty else { return }
+        if model.isRunning {
+            guard model.canSteerSelectedThread else { return }
+            model.steer(prompt)
+        } else {
+            model.send(prompt)
+        }
         text = ""
-        model.send(prompt)
+        selectionUTF16Offset = 0
+        dismissedSuggestionSignature = nil
+    }
+
+    private func prepareSubagentPrompt(route: SubagentRoute, effort: ReasoningEffort) {
+        text = "/subagent Ask \(route.model.name) [\(route.model.id)] at \(effort.rawValue) reasoning to "
+        selectionUTF16Offset = text.utf16.count
+        dismissedSuggestionSignature = nil
+        editorFocused = true
+    }
+
+    private func moveSuggestion(_ offset: Int) {
+        guard !referenceSuggestions.isEmpty else { return }
+        selectedSuggestionIndex = (selectedSuggestionIndex + offset + referenceSuggestions.count) % referenceSuggestions.count
+    }
+
+    private func acceptSelectedSuggestion() {
+        acceptSuggestion(at: selectedSuggestionIndex)
+    }
+
+    private func acceptSuggestion(at index: Int) {
+        guard let query = referenceQuery, referenceSuggestions.indices.contains(index) else { return }
+        let suggestion = referenceSuggestions[index]
+        let replacement = ComposerReferenceResolver.replacingQuery(in: text, query: query, with: suggestion.insertion)
+        text = replacement.text
+        selectionUTF16Offset = replacement.selectionUTF16Offset
+        selectedSuggestionIndex = 0
+        dismissedSuggestionSignature = nil
+        editorFocused = true
+    }
+
+    private func dismissSuggestions() {
+        dismissedSuggestionSignature = referenceQuery?.signature
     }
 }
 
 private struct AgentTextEditor: NSViewRepresentable {
     @Binding var text: String
     @Binding var isFocused: Bool
+    @Binding var selectionUTF16Offset: Int
+    let suggestionsVisible: Bool
+    let onMoveSuggestion: (Int) -> Void
+    let onAcceptSuggestion: () -> Void
+    let onDismissSuggestions: () -> Void
     let onSubmit: () -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
@@ -176,6 +338,10 @@ private struct AgentTextEditor: NSViewRepresentable {
         let textView = CommandTextView()
         textView.delegate = context.coordinator
         textView.submit = onSubmit
+        textView.suggestionsVisible = suggestionsVisible
+        textView.moveSuggestion = onMoveSuggestion
+        textView.acceptSuggestion = onAcceptSuggestion
+        textView.dismissSuggestions = onDismissSuggestions
         textView.string = text
         textView.drawsBackground = false
         textView.backgroundColor = .clear
@@ -205,9 +371,18 @@ private struct AgentTextEditor: NSViewRepresentable {
         guard let textView = scrollView.documentView as? CommandTextView else { return }
         context.coordinator.parent = self
         textView.submit = onSubmit
+        textView.suggestionsVisible = suggestionsVisible
+        textView.moveSuggestion = onMoveSuggestion
+        textView.acceptSuggestion = onAcceptSuggestion
+        textView.dismissSuggestions = onDismissSuggestions
         if textView.string != text {
             textView.string = text
-            textView.setSelectedRange(NSRange(location: text.utf16.count, length: 0))
+            let location = min(selectionUTF16Offset, text.utf16.count)
+            textView.setSelectedRange(NSRange(location: location, length: 0))
+        } else if textView.selectedRange().length == 0,
+                  textView.selectedRange().location != selectionUTF16Offset,
+                  selectionUTF16Offset <= text.utf16.count {
+            textView.setSelectedRange(NSRange(location: selectionUTF16Offset, length: 0))
         }
         if isFocused, textView.window?.firstResponder !== textView {
             textView.window?.makeFirstResponder(textView)
@@ -224,17 +399,45 @@ private struct AgentTextEditor: NSViewRepresentable {
         func textDidChange(_ notification: Notification) {
             guard let textView = notification.object as? NSTextView else { return }
             parent.text = textView.string
+            parent.selectionUTF16Offset = textView.selectedRange().location
+        }
+
+        func textViewDidChangeSelection(_ notification: Notification) {
+            guard let textView = notification.object as? NSTextView else { return }
+            parent.selectionUTF16Offset = textView.selectedRange().location
         }
     }
 }
 
 private final class CommandTextView: NSTextView {
     var submit: (() -> Void)?
+    var suggestionsVisible = false
+    var moveSuggestion: ((Int) -> Void)?
+    var acceptSuggestion: (() -> Void)?
+    var dismissSuggestions: (() -> Void)?
 
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 36, event.modifierFlags.contains(.command) {
             submit?()
             return
+        }
+        if suggestionsVisible {
+            switch event.keyCode {
+            case 125:
+                moveSuggestion?(1)
+                return
+            case 126:
+                moveSuggestion?(-1)
+                return
+            case 36, 48:
+                acceptSuggestion?()
+                return
+            case 53:
+                dismissSuggestions?()
+                return
+            default:
+                break
+            }
         }
         super.keyDown(with: event)
     }
@@ -293,6 +496,7 @@ private struct ModelPickerView: View {
                                         if model.selectedModel.id == item.id {
                                             Image(systemName: "checkmark").font(.system(size: 10, weight: .bold)).foregroundStyle(CosTheme.blue)
                                         }
+                                        ProviderMark(providerID: item.providerID, size: 15)
                                     }
                                     .contentShape(Rectangle())
                                     .padding(.horizontal, 10)
@@ -376,6 +580,8 @@ struct EffortSlider: View {
             let selectedIndex = options.firstIndex(of: selection) ?? 0
             let selectedPosition = inset + CGFloat(selectedIndex) * step
             let thumbPosition = dragPosition ?? selectedPosition
+            let normalizedPosition = min(max((thumbPosition - inset) / max(usable, 1), 0), 1)
+            let sunIntensity = max(0, (normalizedPosition - 0.2) / 0.8)
             ZStack(alignment: .leading) {
                 Capsule().fill(.primary.opacity(0.12)).frame(height: 24)
                 Capsule()
@@ -387,10 +593,7 @@ struct EffortSlider: View {
                         .frame(width: 4, height: 4)
                         .position(x: inset + CGFloat(index) * step, y: 14)
                 }
-                Circle()
-                    .fill(.white)
-                    .frame(width: 28, height: 28)
-                    .shadow(color: .black.opacity(0.16), radius: 3, y: 1)
+                ReasoningSunThumb(intensity: sunIntensity, isDragging: dragPosition != nil)
                     .position(x: thumbPosition, y: 14)
             }
             .contentShape(Rectangle())
@@ -420,5 +623,47 @@ struct EffortSlider: View {
             @unknown default: break
             }
         }
+    }
+}
+
+private struct ReasoningSunThumb: View {
+    let intensity: CGFloat
+    let isDragging: Bool
+
+    var body: some View {
+        ZStack {
+            ForEach(0..<8, id: \.self) { index in
+                Capsule()
+                    .fill(.white.opacity(0.88 * intensity))
+                    .frame(width: 1.5, height: 4)
+                    .offset(y: -15)
+                    .rotationEffect(.degrees(Double(index) * 45))
+            }
+
+            Circle()
+                .fill(.white)
+                .overlay {
+                    Circle()
+                        .fill(
+                            RadialGradient(
+                                colors: [
+                                    .white,
+                                    Color(red: 1, green: 0.91, blue: 0.64).opacity(intensity),
+                                ],
+                                center: .center,
+                                startRadius: 2,
+                                endRadius: 14
+                            )
+                        )
+                        .opacity(intensity * 0.72)
+                }
+                .frame(width: 28, height: 28)
+                .shadow(color: .white.opacity(0.62 * intensity), radius: 3 + 7 * intensity)
+                .shadow(color: Color(red: 1, green: 0.72, blue: 0.25).opacity(0.52 * intensity), radius: 2 + 8 * intensity)
+                .shadow(color: .black.opacity(0.16), radius: 3, y: 1)
+        }
+        .frame(width: 28, height: 28)
+        .animation(isDragging ? nil : .easeInOut(duration: 0.2), value: intensity)
+        .accessibilityHidden(true)
     }
 }

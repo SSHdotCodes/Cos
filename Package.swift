@@ -21,9 +21,13 @@ let package = Package(
         .executableTarget(
             name: "Cos",
             dependencies: ["CosCore"],
-            resources: [.copy("Resources/BuiltInPlugins")],
+            resources: [
+                .copy("Resources/BuiltInPlugins"),
+                .copy("Resources/ProviderLogos"),
+            ],
             linkerSettings: [
                 .linkedFramework("AppKit"),
+                .linkedFramework("WebKit"),
             ]
         ),
         .testTarget(name: "CosCoreTests", dependencies: ["CosCore"]),

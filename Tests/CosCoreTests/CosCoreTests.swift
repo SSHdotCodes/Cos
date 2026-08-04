@@ -107,6 +107,129 @@ final class CosCoreTests: XCTestCase {
         XCTAssertEqual(opus.effortOptions, [.low, .medium, .high, .extraHigh, .max])
         let sol = try XCTUnwrap(DefaultCatalog.models.first { $0.id == "chatgpt:gpt-5.6-sol" })
         XCTAssertTrue(sol.supportsFastMode)
+
+        let luna = try XCTUnwrap(DefaultCatalog.models.first { $0.id == "chatgpt:gpt-5.6-luna" })
+        XCTAssertEqual(luna.effortOptions, ReasoningEffort.allCases)
+        let haiku = try XCTUnwrap(DefaultCatalog.models.first { $0.id == "anthropic:claude-haiku-4.5" })
+        XCTAssertEqual(haiku.effortOptions, [.low])
+    }
+
+    func testComposerReferenceSuggestionsIncludeCommandsSkillsAndPlugins() throws {
+        let manifest = CosPluginManifest(
+            schemaVersion: 1,
+            id: "codes.ssh.cos.computer-use",
+            name: "Computer Use",
+            version: "1.0.0",
+            author: "Cos",
+            description: "Operate Mac apps",
+            capabilities: [],
+            skills: ["computer-use"],
+            homepage: nil,
+            builtIn: true
+        )
+        let plugin = InstalledPlugin(manifest: manifest, location: URL(fileURLWithPath: "/tmp/computer-use"), isTrusted: true, isEnabled: true)
+
+        let slashQuery = try XCTUnwrap(ComposerReferenceResolver.query(in: "/", selectionUTF16Offset: 1))
+        let slashSuggestions = ComposerReferenceResolver.suggestions(for: slashQuery, plugins: [plugin])
+        XCTAssertTrue(slashSuggestions.contains { $0.title == "/subagent" })
+        XCTAssertTrue(slashSuggestions.contains { $0.title == "/goal" })
+        XCTAssertTrue(slashSuggestions.contains { $0.title == "/computer-use" })
+
+        let pluginQuery = try XCTUnwrap(ComposerReferenceResolver.query(in: "@comp", selectionUTF16Offset: 5))
+        let pluginSuggestions = ComposerReferenceResolver.suggestions(for: pluginQuery, plugins: [plugin])
+        XCTAssertEqual(pluginSuggestions.first?.title, "@computer-use")
+
+        let replacement = try XCTUnwrap(pluginSuggestions.first).insertion
+        let updated = ComposerReferenceResolver.replacingQuery(in: "Use @comp", query: .init(trigger: "@", term: "comp", rangeLocation: 4, rangeLength: 5), with: replacement)
+        XCTAssertEqual(updated.text, "Use @computer-use ")
+        XCTAssertEqual(updated.selectionUTF16Offset, 18)
+    }
+
+    func testSubagentRouteUsesExactModelEffortAllowlist() throws {
+        let grok = try XCTUnwrap(DefaultCatalog.models.first { $0.id == "xai:grok-4.5" })
+        let provider = try XCTUnwrap(DefaultCatalog.providers.first { $0.id == grok.providerID })
+        let route = SubagentRoute(model: grok, provider: provider)
+
+        XCTAssertTrue(route.accepts(.low))
+        XCTAssertTrue(route.accepts(.high))
+        XCTAssertFalse(route.accepts(.minimal))
+        XCTAssertFalse(route.accepts(.max))
+        XCTAssertEqual(route.id, "xai:grok-4.5")
+    }
+
+    func testSubagentAuthorityRequiresExplicitPositiveUserIntent() {
+        XCTAssertTrue(SubagentAuthorization.isExplicitlyRequested(in: "/subagent ask Grok to review this"))
+        XCTAssertTrue(SubagentAuthorization.isExplicitlyRequested(in: "Delegate this to another model"))
+        XCTAssertFalse(SubagentAuthorization.isExplicitlyRequested(in: "Do not use subagents for this"))
+        XCTAssertTrue(SubagentAuthorization.isExplicitlyForbidden(in: "Work without subagents"))
+        XCTAssertFalse(SubagentAuthorization.isExplicitlyRequested(in: "Review this implementation"))
+    }
+
+    func testAgentRequestDefaultsToNoSubagentAuthorityOrRecursion() throws {
+        let model = try XCTUnwrap(DefaultCatalog.models.first)
+        let provider = try XCTUnwrap(DefaultCatalog.providers.first { $0.id == model.providerID })
+        let thread = CosThread(workspacePath: "/tmp", modelID: model.id)
+        let request = AgentRequest(
+            prompt: "hello",
+            thread: thread,
+            model: model,
+            provider: provider,
+            effort: .low,
+            fastMode: false,
+            fullAccess: false
+        )
+
+        XCTAssertFalse(request.subagentsAuthorized)
+        XCTAssertTrue(request.availableSubagentRoutes.isEmpty)
+        XCTAssertEqual(request.agentDepth, 0)
+        XCTAssertNil(request.runControl)
+        XCTAssertFalse(request.browserEnabled)
+    }
+
+    func testBetterWrightUsesBoundedStableSessionNames() {
+        XCTAssertEqual(CosBetterWrightRuntime.sanitizedSession("Task 123 / Browser"), "task-123-browser")
+        XCTAssertEqual(CosBetterWrightRuntime.sanitizedSession("---"), "default")
+        XCTAssertLessThanOrEqual(CosBetterWrightRuntime.sanitizedSession(String(repeating: "a", count: 200)).count, 80)
+    }
+
+    func testRunControlKeepsSteeringFIFOAndBoundsQueue() async {
+        let control = AgentRunControl(maximumQueuedMessages: 2)
+        let firstAccepted = await control.submit("first")
+        let secondAccepted = await control.submit("second")
+        let overflowAccepted = await control.submit("third")
+        let messages = await control.drain()
+
+        XCTAssertTrue(firstAccepted)
+        XCTAssertTrue(secondAccepted)
+        XCTAssertFalse(overflowAccepted)
+        XCTAssertEqual(messages.map(\.content), ["first", "second"])
+        let drainedAgain = await control.drain()
+        XCTAssertTrue(drainedAgain.isEmpty)
+    }
+
+    func testRunControlInterruptsOnlyInstalledProviderGeneration() async {
+        let control = AgentRunControl()
+        let interrupted = expectation(description: "provider request interrupted")
+        let currentToken = UUID()
+        await control.installProviderInterrupt(token: currentToken) {
+            interrupted.fulfill()
+        }
+
+        _ = await control.submit("change direction")
+        await fulfillment(of: [interrupted], timeout: 1)
+        await control.clearProviderInterrupt(token: UUID())
+
+        let second = await control.drain()
+        XCTAssertEqual(second.map(\.content), ["change direction"])
+        await control.clearProviderInterrupt(token: currentToken)
+    }
+
+    func testOlderPreferencesDecodeWithoutTitleModel() throws {
+        let json = """
+        {"appearance":"system","fastMode":false,"fullAccess":true,"autoCompact":true,"compactAtPercent":78,"keepRecentTokens":20000,"showTokenUsage":false,"animateStreaming":true,"defaultWorkspace":"/tmp","selectedModelID":"chatgpt:gpt-5.6-sol","defaultEffort":"high"}
+        """
+        let preferences = try JSONDecoder().decode(AppPreferences.self, from: Data(json.utf8))
+        XCTAssertNil(preferences.titleModelID)
     }
 
     func testComputerUseCanListForegroundApplicationsWithoutRetainedState() throws {

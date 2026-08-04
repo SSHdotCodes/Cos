@@ -55,29 +55,29 @@
     }
   },
   {
-    "id": "codes.ssh.cos.run-on-server",
-    "name": "Run on Server",
-    "version": "1.0.0",
-    "author": "ssh.codes",
-    "description": "Deploy and keep services running through configured rasppost or rtxpost targets, including fresh-source synchronization and production verification.",
+    "id": "codes.ssh.cos.betterwright",
+    "name": "BetterWright Browser",
+    "version": "1.6.3",
+    "author": "BetterWright contributors",
+    "description": "Persistent, policy-guarded agentic browsing with a native loopback-only interactive live view inside Cos.",
     "type": "plugin",
     "featured": true,
     "builtIn": true,
-    "tags": ["official", "deployment", "server", "ssh-codes"],
+    "tags": ["official", "browser", "playwright", "automation", "live-view"],
     "downloads": "Built in",
     "manifest": {
       "schemaVersion": 1,
-      "id": "codes.ssh.cos.run-on-server",
-      "name": "Run on Server",
-      "version": "1.0.0",
-      "author": "ssh.codes",
-      "description": "Deploy and keep services running through configured rasppost or rtxpost servers, with fresh-source synchronization and production verification.",
+      "id": "codes.ssh.cos.betterwright",
+      "name": "BetterWright Browser",
+      "version": "1.6.3",
+      "author": "BetterWright contributors",
+      "description": "A persistent, policy-guarded agentic browser with a native interactive live view inside Cos.",
       "capabilities": [
-        {"id": "cos.server.deploy", "description": "Deploy a complete service tree with rasppost or rtxpost when the user explicitly requests server deployment.", "risk": "guarded"},
-        {"id": "cos.server.verify", "description": "Check service status, logs, autostart, restart policy, and public health endpoints.", "risk": "safe"}
+        {"id": "cos.browser.automation", "description": "Navigate and operate websites with bounded Playwright steps in an isolated BetterWright profile.", "risk": "guarded"},
+        {"id": "cos.browser.live-view", "description": "Stream and control the active task's browser in a loopback-only pane inside Cos.", "risk": "safe"}
       ],
-      "skills": ["run-on-server"],
-      "homepage": "https://cos.ssh.codes/plugins/codes.ssh.cos.run-on-server",
+      "skills": ["browser"],
+      "homepage": "https://github.com/BetterWright/betterwright",
       "builtIn": true
     }
   },
