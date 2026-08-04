@@ -21,10 +21,21 @@ enum CosComputerUseRuntime {
         elementIndex: Int?,
         x: Double?,
         y: Double?,
+        fromX: Double? = nil,
+        fromY: Double? = nil,
+        toX: Double? = nil,
+        toY: Double? = nil,
         text: String?,
         key: String?,
         direction: String?,
-        pages: Int?
+        pages: Int?,
+        mouseButton: String? = nil,
+        clickCount: Int? = nil,
+        action: String? = nil,
+        prefix: String? = nil,
+        suffix: String? = nil,
+        selectionType: String? = nil,
+        disableDiff: Bool? = nil
     ) throws -> String {
         if name == "computer_list_apps" { return listApps() }
         if let permissionMessage = accessibilityPermissionMessage() { return permissionMessage }
@@ -40,7 +51,12 @@ enum CosComputerUseRuntime {
         case "computer_click":
             if let elementIndex { return try pressElement(elementIndex, in: running) }
             guard let x, let y else { throw ComputerUseError.missingArgument("element_index or x/y") }
-            return try clickCoordinate(x: x, y: y)
+            return try clickCoordinate(x: x, y: y, button: mouseButton, count: clickCount)
+        case "computer_drag":
+            guard let fromX, let fromY, let toX, let toY else {
+                throw ComputerUseError.missingArgument("from_x, from_y, to_x, and to_y")
+            }
+            return try drag(fromX: fromX, fromY: fromY, toX: toX, toY: toY)
         case "computer_set_value":
             guard let elementIndex, let text else { throw ComputerUseError.missingArgument("element_index and text") }
             return try setValue(text, on: elementIndex, in: running)
@@ -56,6 +72,12 @@ enum CosComputerUseRuntime {
         case "computer_scroll":
             try scroll(direction: direction ?? "down", pages: pages ?? 1)
             return "Scrolled \(direction ?? "down") \(max(1, min(8, pages ?? 1))) page(s) in \(running.localizedName ?? app)."
+        case "computer_secondary_action":
+            guard let elementIndex, let action else { throw ComputerUseError.missingArgument("element_index and action") }
+            return try performSecondaryAction(action, on: elementIndex, in: running)
+        case "computer_select_text":
+            guard let elementIndex, let text else { throw ComputerUseError.missingArgument("element_index and text") }
+            return try selectText(text, prefix: prefix, suffix: suffix, selectionType: selectionType, on: elementIndex, in: running)
         default:
             throw ComputerUseError.unsupportedTool(name)
         }
@@ -113,33 +135,84 @@ enum CosComputerUseRuntime {
 
     private static func nodes(for app: NSRunningApplication) throws -> [Node] {
         let root = AXUIElementCreateApplication(app.processIdentifier)
-        var result: [Node] = []
+        var result: [Node] = [.init(element: root, depth: 0)]
+        var cursor = 0
         var visited = Set<CFHashCode>()
+        visited.insert(CFHash(root))
 
-        func walk(_ element: AXUIElement, depth: Int) {
-            guard depth <= 9, result.count < 650 else { return }
-            let hash = CFHash(element)
-            guard visited.insert(hash).inserted else { return }
-            result.append(.init(element: element, depth: depth))
-            guard let children = attribute(element, kAXChildrenAttribute as String) as? [AXUIElement] else { return }
-            for child in children { walk(child, depth: depth + 1) }
+        // Breadth-first traversal keeps a long chat transcript from consuming
+        // the entire budget before sibling controls such as its composer.
+        while cursor < result.count, result.count < 2_400 {
+            let node = result[cursor]
+            cursor += 1
+            guard node.depth < 14,
+                  let children = attribute(node.element, kAXChildrenAttribute as String) as? [AXUIElement] else { continue }
+            for child in children where result.count < 2_400 {
+                guard visited.insert(CFHash(child)).inserted else { continue }
+                result.append(.init(element: child, depth: node.depth + 1))
+            }
         }
-        walk(root, depth: 0)
         guard !result.isEmpty else { throw ComputerUseError.stateUnavailable(app.localizedName ?? "application") }
         return result
     }
 
     private static func state(of app: NSRunningApplication) throws -> String {
         let elements = try nodes(for: app)
-        var lines = ["Application: \(app.localizedName ?? "Unnamed") (\(app.bundleIdentifier ?? "unknown bundle"))", "Fresh accessibility tree — use these element_index values only until the next action:"]
+        var lines = [
+            "Application: \(app.localizedName ?? "Unnamed") (\(app.bundleIdentifier ?? "unknown bundle"))",
+            "Fresh accessibility state — use these element_index values only until the next action:",
+        ]
+        var included = Set<Int>()
+
+        let editable = elements.indices.filter { isEditableOrFocused(elements[$0].element) }
+        if !editable.isEmpty {
+            lines.append("Key focused and editable controls:")
+            for index in editable.prefix(80) {
+                included.insert(index)
+                lines.append(describe(elements[index].element, index: index, depth: 0))
+            }
+        }
+
+        let navigation = elements.indices.filter {
+            !included.contains($0) && isNavigationControl(elements[$0].element)
+        }
+        if !navigation.isEmpty {
+            lines.append("Key navigation and action controls:")
+            for index in navigation.prefix(240) {
+                included.insert(index)
+                lines.append(describe(elements[index].element, index: index, depth: 0))
+            }
+        }
+
+        lines.append("Bounded accessibility outline:")
+        var byteCount = lines.joined(separator: "\n").utf8.count
         for (index, node) in elements.enumerated() {
-            lines.append(describe(node.element, index: index, depth: node.depth))
-            if lines.joined(separator: "\n").utf8.count > 56_000 {
+            guard !included.contains(index) else { continue }
+            let line = describe(node.element, index: index, depth: node.depth)
+            if byteCount + line.utf8.count + 1 > 56_000 {
                 lines.append("… accessibility tree truncated")
                 break
             }
+            lines.append(line)
+            byteCount += line.utf8.count + 1
         }
+        lines.append("If a control is absent, use the app's keyboard shortcuts plus computer_type_text without an element_index, then fetch fresh state. Do not assume the app is uncontrollable from one sparse tree.")
         return lines.joined(separator: "\n")
+    }
+
+    private static func isEditableOrFocused(_ element: AXUIElement) -> Bool {
+        if boolAttribute(element, kAXFocusedAttribute as String) == true { return true }
+        switch stringAttribute(element, kAXRoleAttribute as String) {
+        case "AXTextArea", "AXTextField", "AXSearchField", "AXComboBox": return true
+        default: return false
+        }
+    }
+
+    private static func isNavigationControl(_ element: AXUIElement) -> Bool {
+        switch stringAttribute(element, kAXRoleAttribute as String) {
+        case "AXLink", "AXButton", "AXMenuItem", "AXPopUpButton", "AXCheckBox", "AXRadioButton", "AXTab": return true
+        default: return false
+        }
     }
 
     private static func describe(_ element: AXUIElement, index: Int, depth: Int) -> String {
@@ -202,15 +275,111 @@ enum CosComputerUseRuntime {
         return "Set element \(index) to \(text.utf8.count) UTF-8 bytes in \(app.localizedName ?? "application"). Fetch a fresh computer_get_state before the next indexed action."
     }
 
-    private static func clickCoordinate(x: Double, y: Double) throws -> String {
+    private static func clickCoordinate(x: Double, y: Double, button: String?, count: Int?) throws -> String {
         let point = CGPoint(x: x, y: y)
-        guard let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: point, mouseButton: .left),
-              let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: point, mouseButton: .left) else {
+        let resolved = try mouseButton(button)
+        let clicks = max(1, min(3, count ?? 1))
+        for click in 1...clicks {
+            let types: (CGEventType, CGEventType)
+            switch resolved {
+            case .left: types = (.leftMouseDown, .leftMouseUp)
+            case .right: types = (.rightMouseDown, .rightMouseUp)
+            case .center: types = (.otherMouseDown, .otherMouseUp)
+            @unknown default: types = (.leftMouseDown, .leftMouseUp)
+            }
+            guard let down = CGEvent(mouseEventSource: nil, mouseType: types.0, mouseCursorPosition: point, mouseButton: resolved),
+                  let up = CGEvent(mouseEventSource: nil, mouseType: types.1, mouseCursorPosition: point, mouseButton: resolved) else {
+                throw ComputerUseError.eventCreationFailed
+            }
+            down.setIntegerValueField(.mouseEventClickState, value: Int64(click))
+            up.setIntegerValueField(.mouseEventClickState, value: Int64(click))
+            down.post(tap: .cghidEventTap)
+            up.post(tap: .cghidEventTap)
+        }
+        return "Clicked screen coordinate (\(Int(x)), \(Int(y))) \(clicks) time(s)."
+    }
+
+    private static func mouseButton(_ value: String?) throws -> CGMouseButton {
+        switch value?.lowercased() ?? "left" {
+        case "left", "l": .left
+        case "right", "r": .right
+        case "middle", "m", "center": .center
+        default: throw ComputerUseError.unknownMouseButton(value ?? "")
+        }
+    }
+
+    private static func drag(fromX: Double, fromY: Double, toX: Double, toY: Double) throws -> String {
+        let start = CGPoint(x: fromX, y: fromY)
+        let end = CGPoint(x: toX, y: toY)
+        guard let down = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDown, mouseCursorPosition: start, mouseButton: .left),
+              let moved = CGEvent(mouseEventSource: nil, mouseType: .leftMouseDragged, mouseCursorPosition: end, mouseButton: .left),
+              let up = CGEvent(mouseEventSource: nil, mouseType: .leftMouseUp, mouseCursorPosition: end, mouseButton: .left) else {
             throw ComputerUseError.eventCreationFailed
         }
         down.post(tap: .cghidEventTap)
+        moved.post(tap: .cghidEventTap)
         up.post(tap: .cghidEventTap)
-        return "Clicked screen coordinate (\(Int(x)), \(Int(y)))."
+        return "Dragged from (\(Int(fromX)), \(Int(fromY))) to (\(Int(toX)), \(Int(toY)))."
+    }
+
+    private static func performSecondaryAction(_ action: String, on index: Int, in app: NSRunningApplication) throws -> String {
+        let elements = try nodes(for: app)
+        guard elements.indices.contains(index) else { throw ComputerUseError.staleElement(index) }
+        var actionsRef: CFArray?
+        guard AXUIElementCopyActionNames(elements[index].element, &actionsRef) == .success,
+              let actions = actionsRef as? [String],
+              let exact = actions.first(where: {
+                  $0.caseInsensitiveCompare(action) == .orderedSame ||
+                  $0.replacingOccurrences(of: "AX", with: "").caseInsensitiveCompare(action) == .orderedSame
+              }) else {
+            throw ComputerUseError.actionUnavailable(action)
+        }
+        let result = AXUIElementPerformAction(elements[index].element, exact as CFString)
+        guard result == .success else { throw ComputerUseError.actionFailed(action, result) }
+        return "Performed \(action) on element \(index). Fetch fresh computer_get_state before another indexed action."
+    }
+
+    private static func selectText(
+        _ text: String,
+        prefix: String?,
+        suffix: String?,
+        selectionType: String?,
+        on index: Int,
+        in app: NSRunningApplication
+    ) throws -> String {
+        let elements = try nodes(for: app)
+        guard elements.indices.contains(index) else { throw ComputerUseError.staleElement(index) }
+        let element = elements[index].element
+        guard let value = rawStringAttribute(element, kAXValueAttribute as String) else {
+            throw ComputerUseError.selectionUnavailable
+        }
+        let source = value as NSString
+        var searchRange = NSRange(location: 0, length: source.length)
+        var match = source.range(of: text, options: [], range: searchRange)
+        while match.location != NSNotFound {
+            let before = source.substring(to: match.location)
+            let after = source.substring(from: NSMaxRange(match))
+            let prefixMatches = prefix == nil || before.hasSuffix(prefix!)
+            let suffixMatches = suffix == nil || after.hasPrefix(suffix!)
+            if prefixMatches && suffixMatches { break }
+            let next = NSMaxRange(match)
+            guard next < source.length else { match = NSRange(location: NSNotFound, length: 0); break }
+            searchRange = NSRange(location: next, length: source.length - next)
+            match = source.range(of: text, options: [], range: searchRange)
+        }
+        guard match.location != NSNotFound else { throw ComputerUseError.textNotFound(text) }
+        let selected: CFRange
+        switch selectionType?.lowercased() ?? "text" {
+        case "text": selected = CFRange(location: match.location, length: match.length)
+        case "cursor_before": selected = CFRange(location: match.location, length: 0)
+        case "cursor_after": selected = CFRange(location: NSMaxRange(match), length: 0)
+        default: throw ComputerUseError.unknownSelectionType(selectionType ?? "")
+        }
+        var mutableRange = selected
+        guard let safeRangeValue = AXValueCreate(.cfRange, &mutableRange) else { throw ComputerUseError.selectionUnavailable }
+        let result = AXUIElementSetAttributeValue(element, kAXSelectedTextRangeAttribute as CFString, safeRangeValue)
+        guard result == .success else { throw ComputerUseError.actionFailed("select text", result) }
+        return "Selected text in element \(index)."
     }
 
     private static func typeUnicode(_ text: String) throws {
@@ -282,6 +451,10 @@ enum CosComputerUseRuntime {
         return nil
     }
 
+    private static func rawStringAttribute(_ element: AXUIElement, _ name: String) -> String? {
+        attribute(element, name) as? String
+    }
+
     private static func boolAttribute(_ element: AXUIElement, _ name: String) -> Bool? {
         (attribute(element, name) as? NSNumber)?.boolValue
     }
@@ -314,6 +487,11 @@ private enum ComputerUseError: LocalizedError {
     case unsupportedTool(String)
     case unknownKey(String)
     case unknownDirection(String)
+    case unknownMouseButton(String)
+    case actionUnavailable(String)
+    case selectionUnavailable
+    case textNotFound(String)
+    case unknownSelectionType(String)
     case textTooLarge
     case eventCreationFailed
 
@@ -327,6 +505,11 @@ private enum ComputerUseError: LocalizedError {
         case .unsupportedTool(let name): "Unknown Computer Use tool: \(name)."
         case .unknownKey(let key): "Unknown keyboard key or shortcut: \(key)."
         case .unknownDirection(let direction): "Computer Use can scroll up or down, not \(direction)."
+        case .unknownMouseButton(let button): "Unknown mouse button: \(button)."
+        case .actionUnavailable(let action): "The element does not expose the secondary action \(action). Fetch fresh state and use one of its listed actions."
+        case .selectionUnavailable: "The selected element does not expose selectable text."
+        case .textNotFound(let text): "Could not find \(text) in the selected element."
+        case .unknownSelectionType(let type): "Unknown selection type: \(type). Use text, cursor_before, or cursor_after."
         case .textTooLarge: "Computer Use text is limited to 100 KB per action."
         case .eventCreationFailed: "macOS could not create the requested input event."
         }

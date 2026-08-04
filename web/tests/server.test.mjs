@@ -18,7 +18,7 @@ test.after(() => child.kill("SIGTERM"));
 test("health and catalog endpoints", async () => {
   const health = await fetch(`http://127.0.0.1:${port}/api/health`).then((response) => response.json());
   assert.equal(health.ok, true);
-  assert.equal(health.version, "1.0.1");
+  assert.equal(health.version, "1.0.2");
   const catalog = await fetch(`http://127.0.0.1:${port}/api/plugins`).then((response) => response.json());
   assert.ok(catalog.items.length >= 2);
 });
@@ -28,8 +28,8 @@ test("serves a no-cache update manifest", async () => {
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("cache-control"), "no-store");
   const update = await response.json();
-  assert.equal(update.version, "1.0.1");
-  assert.equal(update.build, 103);
+  assert.equal(update.version, "1.0.2");
+  assert.equal(update.build, 104);
   assert.match(update.downloadURL, /^https:\/\/cos\.ssh\.codes\/downloads\//);
   assert.match(update.sha256, /^[a-f0-9]{64}$/);
 });

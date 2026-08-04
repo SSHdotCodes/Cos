@@ -172,8 +172,8 @@ private struct MessageView: View {
                     }
                     if message.content.isEmpty && message.isStreaming && (message.workItems?.isEmpty ?? true) {
                         ThinkingIndicator()
-                    } else if !message.content.isEmpty {
-                        Text(.init(message.content))
+                    } else if !visibleAssistantText.isEmpty {
+                        Text(.init(visibleAssistantText))
                             .font(.system(size: 13.2))
                             .textSelection(.enabled)
                             .lineSpacing(2)
@@ -199,6 +199,10 @@ private struct MessageView: View {
             if message.isStreaming { workExpanded = true }
         }
     }
+
+    private var visibleAssistantText: String {
+        CosOutputSanitizer.assistantText(message.content)
+    }
 }
 
 private struct WorkTraceView: View {
@@ -217,7 +221,7 @@ private struct WorkTraceView: View {
                         .rotationEffect(.degrees(isExpanded ? 90 : 0))
                     Text(isRunning ? "Cos is working" : "Work")
                         .font(.system(size: 11.5, weight: .semibold))
-                    Text("\(items.count)")
+                    Text("\(displayItems.count)")
                         .font(.system(size: 9.5, weight: .semibold).monospacedDigit())
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 5)
@@ -234,7 +238,7 @@ private struct WorkTraceView: View {
 
             if isExpanded {
                 VStack(alignment: .leading, spacing: 0) {
-                    ForEach(Array(items.enumerated()), id: \.element.id) { index, item in
+                    ForEach(Array(displayItems.enumerated()), id: \.element.id) { index, item in
                         HStack(alignment: .top, spacing: 9) {
                             VStack(spacing: 0) {
                                 ZStack {
@@ -244,7 +248,7 @@ private struct WorkTraceView: View {
                                         .foregroundStyle(color(for: item.kind))
                                 }
                                 .frame(width: 20, height: 20)
-                                if index < items.count - 1 {
+                                if index < displayItems.count - 1 {
                                     Rectangle().fill(.primary.opacity(0.09)).frame(width: 1, height: 16)
                                 }
                             }
@@ -252,14 +256,14 @@ private struct WorkTraceView: View {
                                 Text(item.title)
                                     .font(.system(size: 11, weight: .medium))
                                 if !item.detail.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                                    Text(item.detail.trimmingCharacters(in: .whitespacesAndNewlines))
+                                    Text(displayDetail(for: item))
                                         .font(.system(size: 10.5))
                                         .foregroundStyle(.secondary)
                                         .lineLimit(item.kind == .reasoning ? 5 : 2)
                                         .textSelection(.enabled)
                                 }
                             }
-                            .padding(.bottom, index < items.count - 1 ? 7 : 2)
+                            .padding(.bottom, index < displayItems.count - 1 ? 7 : 2)
                             Spacer(minLength: 0)
                         }
                     }
@@ -271,6 +275,18 @@ private struct WorkTraceView: View {
             }
         }
         .frame(maxWidth: .infinity)
+    }
+
+    private func displayDetail(for item: WorkTraceItem) -> String {
+        let detail = item.detail.trimmingCharacters(in: .whitespacesAndNewlines)
+        return item.kind == .reasoning ? CosOutputSanitizer.reasoning(detail) : detail
+    }
+
+    private var displayItems: [WorkTraceItem] {
+        items.filter {
+            let title = $0.title.lowercased()
+            return title != "continuing after tool result" && title != "continuing after tool call"
+        }
     }
 
     private func icon(for kind: WorkTraceKind) -> String {

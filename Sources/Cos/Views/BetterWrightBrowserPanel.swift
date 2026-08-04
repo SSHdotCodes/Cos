@@ -163,7 +163,7 @@ private struct BetterWrightWebView: NSViewRepresentable {
           style.textContent = `
             body { padding: 0 !important; background: #080809 !important; }
             #win { border: 0 !important; border-radius: 0 !important; box-shadow: none !important; }
-            #brandbar, #dock, #dims { display: none !important; }
+            #dock, #dims { display: none !important; }
             #tabStrip { padding-top: 2px !important; }
             #toolbar { height: 40px !important; padding: 0 10px !important; }
             #addrPill { height: 28px !important; }

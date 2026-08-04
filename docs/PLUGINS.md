@@ -44,4 +44,4 @@ The website submission form posts metadata and an HTTPS manifest URL to a modera
 
 ## Trust boundary
 
-Version 1.0.1 parses and displays manifests but does not yet implement package signatures or a sandboxed executable plugin host. Treat third-party plugin resources as code: inspect them and grant only the capabilities you understand. Project-local manifests are not marked trusted automatically.
+Version 1.0.2 parses and displays manifests but does not yet implement package signatures or a sandboxed executable plugin host. Treat third-party plugin resources as code: inspect them and grant only the capabilities you understand. Project-local manifests are not marked trusted automatically.

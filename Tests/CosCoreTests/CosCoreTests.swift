@@ -2,6 +2,83 @@ import XCTest
 @testable import CosCore
 
 final class CosCoreTests: XCTestCase {
+    func testToolCallParserRecoversMissingClosingTagAndIgnoresLaterCalls() throws {
+        let response = """
+        to=cos-tool? Nope must emit exact marker.<cos-tool>{"name":"browser_run","code":"await page.goto('https://betterwright.com'); return {nested: {ok: true}}","note":"Opening betterwright.com"}<cos-tool>{"name":"browser_status"}Final text
+        """
+        let call = try XCTUnwrap(CosToolCall.extract(from: response))
+        XCTAssertEqual(call.name, "browser_run")
+        XCTAssertEqual(call.note, "Opening betterwright.com")
+        XCTAssertEqual(call.code, "await page.goto('https://betterwright.com'); return {nested: {ok: true}}")
+    }
+
+    func testOutputSanitizerHidesToolProtocolButKeepsFinalAnswer() {
+        let response = """
+        to=cos-tool? Nope must emit exact marker.<cos-tool>{"name":"browser_run","code":"await page.goto('https://betterwright.com')"}<cos-tool>{"name":"browser_status"}I’d rate the design 8/10.
+        """
+        XCTAssertEqual(CosOutputSanitizer.assistantText(response), "I’d rate the design 8/10.")
+    }
+
+    func testReasoningSanitizerTurnsJoinedMarkdownSummariesIntoLines() {
+        let raw = "**Planning browser inspection****Testing browser plugin integration****Rating landing page design**"
+        XCTAssertEqual(
+            CosOutputSanitizer.reasoning(raw),
+            "Planning browser inspection\nTesting browser plugin integration\nRating landing page design"
+        )
+    }
+
+    func testComputerUseToolParserSupportsCodexCompatibleActions() throws {
+        let response = """
+        <cos-tool>{"name":"computer_drag","app":"Chat","from_x":12,"from_y":34,"to_x":56,"to_y":78,"mouse_button":"left","click_count":2,"action":"Show Menu","selection_type":"cursor_after","disable_diff":true}</cos-tool>
+        """
+        let call = try XCTUnwrap(CosToolCall.extract(from: response))
+        XCTAssertEqual(call.name, "computer_drag")
+        XCTAssertEqual(call.app, "Chat")
+        XCTAssertEqual(call.fromX, 12)
+        XCTAssertEqual(call.toY, 78)
+        XCTAssertEqual(call.clickCount, 2)
+        XCTAssertEqual(call.action, "Show Menu")
+        XCTAssertEqual(call.selectionType, "cursor_after")
+        XCTAssertEqual(call.disableDiff, true)
+    }
+
+    func testBrowserToolParserSupportsProAIStyleEnvelope() throws {
+        let response = """
+        <cos-tool>{"name":"browser","code":"return snapshot({interactive:true})","note":"Inspecting the page","timeout_seconds":90,"url":"https://example.com"}</cos-tool>
+        """
+        let call = try XCTUnwrap(CosToolCall.extract(from: response))
+        XCTAssertEqual(call.name, "browser")
+        XCTAssertEqual(call.note, "Inspecting the page")
+        XCTAssertEqual(call.timeoutSeconds, 90)
+        XCTAssertEqual(call.url, "https://example.com")
+    }
+
+    func testBetterWrightPackagedWorkflowWhenExplicitlyEnabled() async throws {
+        guard ProcessInfo.processInfo.environment["COS_BETTERWRIGHT_INTEGRATION_TEST"] == "1" else {
+            throw XCTSkip("Set COS_BETTERWRIGHT_INTEGRATION_TEST=1 to exercise the installed BetterWright runtime.")
+        }
+        let output = try await CosBetterWrightRuntime.runBrowserWithProof(
+            code: "await page.goto('https://betterwright.com', { waitUntil: 'domcontentloaded' }); return { title: await page.title(), snapshot: await snapshot({ interactive: true }) }",
+            session: "cos-1-0-2-integration",
+            note: "Testing the packaged browser workflow"
+        )
+        XCTAssertTrue(output.contains("BetterWright"))
+        XCTAssertEqual(try browserEnvelopeSucceeded(output), true, output)
+
+        let clickOutput = try await CosBetterWrightRuntime.runBrowserWithProof(
+            code: "const target = page.getByRole('banner').getByRole('link', { name: 'Docs', exact: true }); await human.click(target); await page.waitForLoadState('domcontentloaded'); return { url: page.url(), title: await page.title() }",
+            session: "cos-1-0-2-integration",
+            note: "Testing the visible agent cursor"
+        )
+        XCTAssertEqual(try browserEnvelopeSucceeded(clickOutput), true, clickOutput)
+    }
+
+    private func browserEnvelopeSucceeded(_ output: String) throws -> Bool {
+        let data = try XCTUnwrap(output.data(using: .utf8))
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        return try XCTUnwrap(object["ok"] as? Bool)
+    }
+
     func testUpdateCheckFindsNewVersionOrBuild() async throws {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [UpdateURLProtocolStub.self]
