@@ -1,0 +1,39 @@
+[package]
+name = "cos"
+version = "1.0.1"
+edition = "2021"
+
+[dependencies]
+cos-core = { path = "../cos-core" }
+gpui = "0.2"
+tokio = { version = "1", features = ["rt-multi-thread", "sync", "macros", "time"] }
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["preserve_order"] }
+uuid = { version = "1", features = ["v4", "serde"] }
+url = { version = "2", features = ["serde"] }
+time = { version = "0.3", features = ["serde", "formatting", "parsing"] }
+pulldown-cmark = { version = "0.12", default-features = false }
+regex = "1"
+unicode-segmentation = "1"
+smallvec = "1"
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-features = false }
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", features = [
+    "NSString",
+    "NSURL",
+    "NSURLRequest",
+    "NSFileManager",
+    "NSPathUtilities",
+    "NSError",
+    "NSArray",
+    "NSData",
+    "NSDictionary",
+    "NSUUID",
+    "NSValue",
+] }
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSWindow", "NSView", "NSMenu", "NSMenuItem", "NSEvent"] }
+objc2-web-kit = { version = "0.3", features = ["WKWebView", "WKWebViewConfiguration", "WKNavigation"] }
+objc2-core-foundation = "0.3"
+block2 = "0.6"
+anyhow = "1.0.104"
