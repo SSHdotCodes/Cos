@@ -2,7 +2,7 @@
 
 ## Design target
 
-Cos keeps the resident app small. SwiftUI owns windows and interaction state; the native Swift `CosHarness` owns provider streaming and tool orchestration; Security owns secrets. BetterWright and its managed browser are lazy processes used only for web tasks, never a replacement coding-agent harness.
+Cos keeps the resident app small. GPUI owns windows and interaction state; the native Rust `CosHarness` (`cos-core`) owns provider streaming and tool orchestration; the macOS Keychain owns secrets. BetterWright and its managed browser are lazy processes used only for web tasks, never a replacement coding-agent harness.
 
 ## Runtime flow
 
@@ -29,7 +29,7 @@ Enabled plugin skill files are injected into a bounded extension context. The mo
 
 Computer Use enumerates a fresh macOS accessibility tree for every indexed action and deliberately retains no stale element handles. The newest user-authored request is injected separately as its authority boundary; ordinary steps inside that request continue without another prompt, while third-party UI content cannot expand the scope.
 
-BetterWright uses a pinned CLI and portable Node runtime bundled in release builds. Each Cos task maps to a bounded BetterWright session name under the dedicated `cos` profile. `browser_run` performs small Playwright action-and-observe steps against that persistent session. The SwiftUI inspector starts a loopback-only interactive `betterwright view` for the same session, validates the returned URL, and loads it through a narrow `WKWebView` bridge. Native controls can close the active tab or detach the viewer without destroying the remaining task session. The roughly 200 MB managed browser is installed once on demand and stays out of the resident app process.
+BetterWright uses a pinned CLI and portable Node runtime bundled in release builds. Each Cos task maps to a bounded BetterWright session name under the dedicated `cos` profile. `browser_run` performs small Playwright action-and-observe steps against that persistent session. The in-app inspector starts a loopback-only interactive `betterwright view` for the same session, validates the returned URL, and loads it through a narrow `WKWebView` overlay bridge. Native controls can close the active tab or detach the viewer without destroying the remaining task session. The roughly 200 MB managed browser is installed once on demand and stays out of the resident app process.
 
 The skill importer copies bounded portable bundles into a dedicated local plugin, preserving `SKILL.md`, scripts, references, and assets while skipping symlinks and build/dependency directories. Codex and Claude Code source folders remain unchanged. The plugin window also loads the moderated `cos.ssh.codes` catalog directly, supports search, and installs validated matching manifests into Cos-managed storage.
 
@@ -62,7 +62,7 @@ Goals contain an objective, status, optional token budget, usage, and creation d
 
 ## Appearance
 
-System, Light, and Dark follow standard SwiftUI color schemes. True Dark also replaces material-backed composer/sidebar surfaces, the window toolbar, and both main/settings backgrounds with pure black. A narrow AppKit window bridge is used only for titlebar transparency and background color.
+System, Light, and Dark follow standard macOS color schemes. True Dark also replaces material-backed composer/sidebar surfaces, the window toolbar, and both main/settings backgrounds with pure black.
 
 ## Marketplace server
 

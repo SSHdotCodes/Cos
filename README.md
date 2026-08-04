@@ -24,11 +24,11 @@
 
 ![Cos native macOS workspace](docs/images/cos-workspace.png)
 
-Cos keeps the entire coding-agent loop in one lightweight Swift runtime: provider streaming, goals, compaction, tools, plugins, skills, credentials, and task history. BetterWright starts only for live web work, while every model and subagent stays inside the Cos harness.
+Cos keeps the entire coding-agent loop in one lightweight Rust runtime: provider streaming, goals, compaction, tools, plugins, skills, credentials, and task history. BetterWright starts only for live web work, while every model and subagent stays inside the Cos harness.
 
 ## Why Cos
 
-- **Native and lean.** SwiftUI, direct provider transports, macOS Keychain, bounded work traces, and no Electron runtime.
+- **Native and lean.** Rust + GPUI, direct provider transports, macOS Keychain, bounded work traces, and no Electron runtime.
 - **One harness for every model.** ChatGPT, Anthropic, xAI, Qwen, OpenCode Go, Pi, and custom OpenAI-compatible endpoints use the same Cos tool loop.
 - **Long-running tasks that stay coherent.** Persistent `/goal` state and compacted checkpoints preserve intent while controlling context growth.
 - **Steer without starting over.** Type new direction while a run is active and Cos immediately continues from the updated conversation.
@@ -96,33 +96,28 @@ BYOK values are stored as generic-password items under the `codes.ssh.cos` Keych
 
 ## Build from source
 
-Requirements: macOS 15+, Xcode/Swift 6.2 or later, and Node 20+ for the marketplace tests. Release packaging downloads a pinned portable Node 24.16.0 runtime and BetterWright 1.6.3; development builds can use a compatible global BetterWright installation.
+Requirements: macOS 15+, a stable Rust toolchain, and Node 20+ for the marketplace tests. Development builds use a compatible BetterWright installation (`bw` on PATH) for the live browser panel.
 
 ```sh
 git clone https://github.com/SSHDotCodes/Cos.git
 cd Cos
-swift test --scratch-path /tmp/cos-test-build
-scripts/run_debug.sh
+cargo test --manifest-path rust/Cargo.toml
+cargo run --manifest-path rust/Cargo.toml -p cos
 ```
 
-Create the same ad-hoc-signed release artifacts used by the public workflow:
+Run the marketplace suite with:
 
 ```sh
-scripts/build_release.sh
 npm test --prefix web
 ```
-
-Artifacts are written to `outputs/` and intentionally excluded from Git. Tagged releases publish the DMG, architecture-specific ZIP, source archive, and SHA-256 checksums through GitHub Actions.
 
 ## Repository map
 
 ```text
-Sources/CosCore   Provider transports, harness, tools, compaction, updates
-Sources/Cos       Native SwiftUI application and built-in plugins
-Tests             Core behavior and update tests
-web               Zero-dependency marketplace and download service
-docs              Architecture, provider, plugin, and security notes
-scripts           Debug and release packaging
+rust/crates/cos-core  Provider transports, harness, tools, compaction, updates
+rust/crates/cos       Native GPUI application and built-in plugins
+web                   Zero-dependency marketplace and download service
+docs                  Architecture, provider, plugin, and security notes
 ```
 
 ## Plugins and skills
@@ -131,7 +126,7 @@ The built-in Cos plugin can manage allowlisted preferences and Cos-owned skills/
 
 ## Contributing
 
-Issues and focused pull requests are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) and the [security policy](SECURITY.md) before opening one. CI runs Swift tests on an Apple-silicon macOS runner and the marketplace suite on Linux.
+Issues and focused pull requests are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) and the [security policy](SECURITY.md) before opening one. CI runs the Rust tests and a release build on an Apple-silicon macOS runner and the marketplace suite on Linux.
 
 ## License
 

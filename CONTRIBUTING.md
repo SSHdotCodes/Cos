@@ -11,7 +11,7 @@ Thanks for helping make Cos better. Small, focused changes are easiest to review
 5. Explain user impact, implementation tradeoffs, and any security or migration concerns.
 
 ```sh
-swift test --scratch-path /tmp/cos-test-build
+cargo test --manifest-path rust/Cargo.toml
 npm test --prefix web
 ```
 

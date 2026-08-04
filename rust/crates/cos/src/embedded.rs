@@ -7,37 +7,37 @@ use std::path::{Path, PathBuf};
 const FILES: &[(&str, &str)] = &[
     (
         "betterwright/cos.plugin.json",
-        include_str!("../../../../Sources/Cos/Resources/BuiltInPlugins/betterwright/cos.plugin.json"),
+        include_str!("../resources/BuiltInPlugins/betterwright/cos.plugin.json"),
     ),
     (
         "betterwright/skills/browser/SKILL.md",
-        include_str!("../../../../Sources/Cos/Resources/BuiltInPlugins/betterwright/skills/browser/SKILL.md"),
+        include_str!("../resources/BuiltInPlugins/betterwright/skills/browser/SKILL.md"),
     ),
     (
         "computer-use/cos.plugin.json",
-        include_str!("../../../../Sources/Cos/Resources/BuiltInPlugins/computer-use/cos.plugin.json"),
+        include_str!("../resources/BuiltInPlugins/computer-use/cos.plugin.json"),
     ),
     (
         "computer-use/skills/computer-use/SKILL.md",
-        include_str!("../../../../Sources/Cos/Resources/BuiltInPlugins/computer-use/skills/computer-use/SKILL.md"),
+        include_str!("../resources/BuiltInPlugins/computer-use/skills/computer-use/SKILL.md"),
     ),
     (
         "computer-use/skills/computer-use/agents/openai.yaml",
-        include_str!("../../../../Sources/Cos/Resources/BuiltInPlugins/computer-use/skills/computer-use/agents/openai.yaml"),
+        include_str!("../resources/BuiltInPlugins/computer-use/skills/computer-use/agents/openai.yaml"),
     ),
     (
         "cos/cos.plugin.json",
-        include_str!("../../../../Sources/Cos/Resources/BuiltInPlugins/cos/cos.plugin.json"),
+        include_str!("../resources/BuiltInPlugins/cos/cos.plugin.json"),
     ),
 ];
 
 const LOGOS: &[(&str, &str)] = &[
-    ("openai.svg", include_str!("../../../../Sources/Cos/Resources/ProviderLogos/openai.svg")),
-    ("claude.svg", include_str!("../../../../Sources/Cos/Resources/ProviderLogos/claude.svg")),
-    ("grok.svg", include_str!("../../../../Sources/Cos/Resources/ProviderLogos/grok.svg")),
-    ("opencode.svg", include_str!("../../../../Sources/Cos/Resources/ProviderLogos/opencode.svg")),
-    ("pi.svg", include_str!("../../../../Sources/Cos/Resources/ProviderLogos/pi.svg")),
-    ("qwen.svg", include_str!("../../../../Sources/Cos/Resources/ProviderLogos/qwen.svg")),
+    ("openai.svg", include_str!("../resources/ProviderLogos/openai.svg")),
+    ("claude.svg", include_str!("../resources/ProviderLogos/claude.svg")),
+    ("grok.svg", include_str!("../resources/ProviderLogos/grok.svg")),
+    ("opencode.svg", include_str!("../resources/ProviderLogos/opencode.svg")),
+    ("pi.svg", include_str!("../resources/ProviderLogos/pi.svg")),
+    ("qwen.svg", include_str!("../resources/ProviderLogos/qwen.svg")),
 ];
 
 /// Materialize embedded assets, refreshing files whose content changed.
